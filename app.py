@@ -357,7 +357,7 @@ with col_ledger:
                 <hr style='margin: 1.5rem 0;'>
                 <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;'>
                     <div>
-                        <p style='margin:0; font-size:0.75rem; color:#666666 !important; text-transform:uppercase;'>Asset Profile</p>
+                        <p style='margin:0; font-size:0.75rem; color:#666666 !important; text-transform:uppercase;'>Player Profile</p>
                         <p style='margin:0; font-size:1.1rem; font-weight:700; color:#FFF !important;'>{player_name.upper()}</p>
                     </div>
                     <div>
