@@ -170,7 +170,7 @@ st.markdown("""
     /* High-Fidelity Social Icons Footer */
     .footer-container {
         text-align: center;
-        padding-bottom: 2rem;
+        padding-bottom: 0.5rem;
     }
 
     .footer-social-links {
@@ -182,7 +182,7 @@ st.markdown("""
 
     .footer-social-links a {
         color: #444444 !important;
-        font-size: 1.3rem;
+        font-size: 2.0rem;
         transition: all 0.3s ease;
         text-decoration: none;
     }
@@ -412,11 +412,12 @@ with col_ledger:
         """, unsafe_allow_html=True)
 
 # ---------- FOOTER SYSTEM ----------
-st.markdown("<hr style='margin-top: 4rem;'>", unsafe_allow_html=True)
+st.markdown("<hr style='margin-top: 2rem; margin-bottom: 1rem;'>", unsafe_allow_html=True)
 st.markdown("""
 <div class='footer-container'>
-    <p style='color: #444444 !important; font-size: 0.75rem; letter-spacing: 0.05em; margin-bottom: 0.5rem;'>
-        UNDER THE HAMMER SECURE INSTANCE // LATENCY TERMINAL METRICS PROCESSED // NO FINANCIAL ADVICE CONVEYED
+    <p style='color: #888888 !important; font-size: 0.85rem; line-height: 1.5; margin-bottom: 1rem;'>
+        This is a fan-based app to predict your favorite player's price in the next auction just for fun! Enjoy experimenting with the numbers.<br>
+        If you like the app and want to see me build bigger and better projects for the fans, consider supporting me on Patreon!
     </p>
     <div class='footer-social-links'>
         <a href='https://github.com/tahahssn/UNDER-THE-HAMMER' target='_blank' title='GitHub Repository'><i class='fab fa-github'></i></a>
