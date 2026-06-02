@@ -211,7 +211,7 @@ col_title, col_status = st.columns([4, 1])
 with col_title:
     st.markdown("<div class='saffron-accent'>HBL PSL AUCTION LIVE EXCHANGE</div>", unsafe_allow_html=True)
     st.markdown("<h1 style='font-size: 3rem; margin-top: -0.5rem; margin-bottom: 0;'>UNDER THE HAMMER</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='margin-top: 0rem;'>High-fidelity asset pricing model calibrated for PSL 11 auction matrices.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='margin-top: 0rem;'>High-fidelity asset pricing model calibrated for HBL PSL auction matrices.</p>", unsafe_allow_html=True)
 
 with col_status:
     if model_ready:
