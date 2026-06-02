@@ -209,7 +209,7 @@ ridge_model, feature_cols, model_ready = load_model()
 # ---------- HEADER SYSTEM ----------
 col_title, col_status = st.columns([4, 1])
 with col_title:
-    st.markdown("<div class='saffron-accent'>HBL PSL LIVE EXCHANGE</div>", unsafe_allow_html=True)
+    st.markdown("<div class='saffron-accent'>HBL PSL AUCTION LIVE EXCHANGE</div>", unsafe_allow_html=True)
     st.markdown("<h1 style='font-size: 3rem; margin-top: -0.5rem; margin-bottom: 0;'>UNDER THE HAMMER</h1>", unsafe_allow_html=True)
     st.markdown("<p style='margin-top: 0rem;'>High-fidelity asset pricing model calibrated for PSL 11 auction matrices.</p>", unsafe_allow_html=True)
 
@@ -230,12 +230,12 @@ with col_inputs:
     st.markdown("<div class='saffron-accent'>ASSET IDENTITY</div>", unsafe_allow_html=True)
     st.markdown("<h3 style='margin-top:-0.2rem; margin-bottom:1.5rem;'>Registry Parameters</h3>", unsafe_allow_html=True)
     
-    player_name = st.text_input("Asset Label / Player Name", placeholder="e.g., Virat Kohli")
+    player_name = st.text_input("Player Name", placeholder="e.g., Virat Kohli")
     
     row_meta1, row_meta2 = st.columns(2)
     with row_meta1:
         category = st.selectbox("Auction Tier Assignment", options=["Platinum", "Diamond", "Gold", "Emerging"])
-        player_type = st.selectbox("Operational Architecture / Role", options=["Batter", "Bowler", "All-rounder", "Wicket-keeper Batter"])
+        player_type = st.selectbox("Role", options=["Batter", "Bowler", "All-rounder", "Wicket-keeper Batter"])
     
     # Tier Base Price Logic Mapping
     tier_price_map = {"Platinum": 4.2, "Diamond": 2.2, "Gold": 1.1, "Emerging": 0.6}
@@ -366,14 +366,17 @@ with col_ledger:
                 
             net_delta = calculated_valuation - base_price
             
+            psl_teams = ["Karachi Kings", "Lahore Qalandars", "Quetta Gladiators", "Rawalpindiz", "Multan Sultan", "Peshawar Zalmi", "Islamabad United", "Hyderabad Kingsmen"]
+            random_team = np.random.choice(psl_teams)
+            
             # ----- FINTECH LEDGER VISUALIZATION -----
             st.markdown(f"""
             <div class='ledger-block'>
-                <span class='saffron-accent'>PREDICTED SETTLEMENT VALUE</span>
+                <span class='saffron-accent'>PREDICTED AUCTION VALUE</span>
                 <div class='valuation-headline'>PKR {calculated_valuation:.2f} CR</div>
                 <div style='display: flex; gap: 0.5rem; margin-top: 1.5rem; flex-wrap: wrap;'>
                     <span class='badge-gold'>👑 {category.upper()} ASSET</span>
-                    <span class='badge-income'>Δ GAIN: +{net_delta:.2f} CR</span>
+                    <span class='badge-income'>💸 GAIN: +{net_delta:.2f} CR</span>
                     <span class='badge-gold'>X-MULT: {structural_multiplier:.2f}x</span>
                 </div>
                 <hr style='margin: 1.5rem 0;'>
@@ -384,15 +387,19 @@ with col_ledger:
                     </div>
                     <div>
                         <p style='margin:0; font-size:0.75rem; color:#666666 !important; text-transform:uppercase;'>Sovereign Origin</p>
-                        <p style='margin:0; font-size:1.1rem; font-weight:700; color:#FF6B00 !important;'> {nationality.upper()}</p>
+                        <p style='margin:0; font-size:1.1rem; font-weight:700; color:#FF6B00 !important;'>🌏 {nationality.upper()}</p>
                     </div>
                     <div>
                         <p style='margin:0; font-size:0.75rem; color:#666666 !important; text-transform:uppercase;'>Floor Value</p>
-                        <p style='margin:0; font-size:1rem; font-weight:700; color:#FFF !important;'>PKR {base_price:.2f} CR</p>
+                        <p style='margin:0; font-size:1rem; font-weight:700; color:#FFF !important;'>💰PKR {base_price:.2f} CR</p>
                     </div>
                     <div>
                         <p style='margin:0; font-size:0.75rem; color:#666666 !important; text-transform:uppercase;'>Operational Specs</p>
-                        <p style='margin:0; font-size:1rem; font-weight:700; color:#FFF !important;'>{player_type}</p>
+                        <p style='margin:0; font-size:1rem; font-weight:700; color:#FFF !important;'>🏏{player_type}</p>
+                    </div>
+                    <div style='grid-column: span 2; margin-top: 0.5rem;'>
+                        <p style='margin:0; font-size:0.75rem; color:#666666 !important; text-transform:uppercase;'>Sold To</p>
+                        <p style='margin:0; font-size:1.1rem; font-weight:700; color:#FF6B00 !important;'>{random_team.upper()}</p>
                     </div>
                 </div>
             </div>
