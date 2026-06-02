@@ -412,8 +412,8 @@ st.markdown("""
         UNDER THE HAMMER SECURE INSTANCE // LATENCY TERMINAL METRICS PROCESSED // NO FINANCIAL ADVICE CONVEYED
     </p>
     <div class='footer-social-links'>
-        <a href='https://github.com/your-profile' target='_blank' title='GitHub Repository'><i class='fab fa-github'></i></a>
-        <a href='https://patreon.com/your-profile' target='_blank' title='Support on Patreon'><i class='fab fa-patreon'></i></a>
+        <a href='https://github.com/tahahssn/UNDER-THE-HAMMER' target='_blank' title='GitHub Repository'><i class='fab fa-github'></i></a>
+        <a href='https://www.patreon.com/c/SyedTahaHassan' target='_blank' title='Support on Patreon'><i class='fab fa-patreon'></i></a>
     </div>
 </div>
 """, unsafe_allow_html=True)
