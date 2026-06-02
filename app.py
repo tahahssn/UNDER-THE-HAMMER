@@ -211,7 +211,7 @@ col_title, col_status = st.columns([4, 1])
 with col_title:
     st.markdown("<div class='saffron-accent'>HBL PSL LIVE EXCHANGE</div>", unsafe_allow_html=True)
     st.markdown("<h1 style='font-size: 3rem; margin-top: -0.5rem; margin-bottom: 0;'>UNDER THE HAMMER</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='margin-top: 0rem;'>High-fidelity asset pricing model calibrated for PSL 11 draft matrices.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='margin-top: 0rem;'>High-fidelity asset pricing model calibrated for PSL 11 auction matrices.</p>", unsafe_allow_html=True)
 
 with col_status:
     if model_ready:
@@ -234,7 +234,7 @@ with col_inputs:
     
     row_meta1, row_meta2 = st.columns(2)
     with row_meta1:
-        category = st.selectbox("Draft Tier Assignment", options=["Platinum", "Diamond", "Gold", "Emerging"])
+        category = st.selectbox("Auction Tier Assignment", options=["Platinum", "Diamond", "Gold", "Emerging"])
         player_type = st.selectbox("Operational Architecture / Role", options=["Batter", "Bowler", "All-rounder", "Wicket-keeper Batter"])
     
     # Tier Base Price Logic Mapping
@@ -242,7 +242,7 @@ with col_inputs:
     default_base = tier_price_map.get(category, 1.1)
 
     with row_meta2:
-        base_price = st.number_input("Floor Evaluation (PKR Crore)", min_value=0.1, max_value=30.0, value=default_base, step=0.1, help="Auto-calculated from selected Draft Tier")
+        base_price = st.number_input("Floor Evaluation (PKR Crore)", min_value=0.1, max_value=30.0, value=default_base, step=0.1, help="Auto-calculated from selected Auction Tier")
         
         nations_list = [
             "Pakistan", "India", "Australia", "England", "South Africa", "New Zealand",
@@ -384,7 +384,7 @@ with col_ledger:
                     </div>
                     <div>
                         <p style='margin:0; font-size:0.75rem; color:#666666 !important; text-transform:uppercase;'>Sovereign Origin</p>
-                        <p style='margin:0; font-size:1.1rem; font-weight:700; color:#FF6B00 !important;'>🌍 {nationality.upper()}</p>
+                        <p style='margin:0; font-size:1.1rem; font-weight:700; color:#FF6B00 !important;'> {nationality.upper()}</p>
                     </div>
                     <div>
                         <p style='margin:0; font-size:0.75rem; color:#666666 !important; text-transform:uppercase;'>Floor Value</p>
