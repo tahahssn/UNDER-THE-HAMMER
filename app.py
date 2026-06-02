@@ -13,7 +13,9 @@ st.set_page_config(
 # ---------- SAFFRON FINTECH CSS (CRED / ZERODHA INSPIRED) ----------
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
+    /* Font & Icon Imports */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght=300;400;500;600;700;900&display=swap');
+    @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
     
     h1, h2, h3 {
         font-family: 'Inter', sans-serif !important;
@@ -30,7 +32,7 @@ st.markdown("""
         background-color: #0A0A0A !important;
     }
 
-    /* Clean Card Layouts (No custom floating unclosed divs) */
+    /* Clean Card Layouts */
     .fintech-card {
         background: #141414;
         border-radius: 12px;
@@ -164,6 +166,31 @@ st.markdown("""
     hr {
         border-color: #1F1F1F;
     }
+
+    /* High-Fidelity Social Icons Footer */
+    .footer-container {
+        text-align: center;
+        padding-bottom: 2rem;
+    }
+
+    .footer-social-links {
+        display: flex;
+        justify-content: center;
+        gap: 1.5rem;
+        margin-top: 1rem;
+    }
+
+    .footer-social-links a {
+        color: #444444 !important;
+        font-size: 1.3rem;
+        transition: all 0.3s ease;
+        text-decoration: none;
+    }
+
+    .footer-social-links a:hover {
+        color: #FF6B00 !important;
+        transform: translateY(-2px);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -217,7 +244,6 @@ with col_inputs:
     with row_meta2:
         base_price = st.number_input("Floor Evaluation (PKR Crore)", min_value=0.1, max_value=30.0, value=default_base, step=0.1, help="Auto-calculated from selected Draft Tier")
         
-        # Expanded Nation List + Custom Entry Logic
         nations_list = [
             "Pakistan", "India", "Australia", "England", "South Africa", "New Zealand",
             "West Indies", "Sri Lanka", "Bangladesh", "Afghanistan", "Zimbabwe",
@@ -239,7 +265,6 @@ with col_inputs:
     st.markdown("<div class='saffron-accent'>PERFORMANCE TELEMETRY</div>", unsafe_allow_html=True)
     st.markdown("<h3 style='margin-top:-0.2rem; margin-bottom:1.5rem;'>Yield & Output Vectors</h3>", unsafe_allow_html=True)
     
-    # Default initializations to prevent calculation errors
     batting_avg = 26.5
     strike_rate = 132.5
     bowling_economy = 7.6
@@ -248,7 +273,6 @@ with col_inputs:
     playstyle_multiplier = 1.0
     recent_form = 6
 
-    # --- DYNAMIC UI RENDER BASED ON PLAYER TYPE ---
     if player_type == "Batter":
         grid_s1, grid_s2 = st.columns(2)
         with grid_s1:
@@ -306,7 +330,6 @@ with col_ledger:
         if not player_name.strip():
             st.markdown("<div class='terminal-panel' style='border-left-color:#E74C3C;'><p style='color:#E74C3C !important; margin:0; font-weight:600;'>[ERROR] Execution halted: Null asset signature identifier.</p></div>", unsafe_allow_html=True)
         else:
-            # Algorithmic calculation
             base_anchor = float(base_price)
             if category == "Platinum": base_anchor += 3.5
             elif category == "Diamond": base_anchor += 2.0
@@ -316,11 +339,10 @@ with col_ledger:
             if player_type in ["Batter", "All-rounder", "Wicket-keeper Batter"]:
                 bat_factor += ((batting_avg - 25) * 0.012) + ((strike_rate - 130) * 0.005)
                 
-            # Apply dynamic modifications based on new UI parameters
             if player_type == "Batter":
                 bat_factor *= playstyle_multiplier
             elif player_type == "Wicket-keeper Batter":
-                bat_factor += ((wk_dismissals - 1.0) * 0.05) # Math reward for high dismissals
+                bat_factor += ((wk_dismissals - 1.0) * 0.05)
                 
             bowl_factor = 1.0
             if player_type in ["Bowler", "All-rounder"]:
@@ -384,4 +406,14 @@ with col_ledger:
 
 # ---------- FOOTER SYSTEM ----------
 st.markdown("<hr style='margin-top: 4rem;'>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #444444 !important; font-size: 0.75rem; letter-spacing: 0.05em;'>UNDER THE HAMMER SECURE INSTANCE // LATENCY TERMINAL METRICS PROCESSED // NO FINANCIAL ADVICE CONVEYED</p>", unsafe_allow_html=True)
+st.markdown("""
+<div class='footer-container'>
+    <p style='color: #444444 !important; font-size: 0.75rem; letter-spacing: 0.05em; margin-bottom: 0.5rem;'>
+        UNDER THE HAMMER SECURE INSTANCE // LATENCY TERMINAL METRICS PROCESSED // NO FINANCIAL ADVICE CONVEYED
+    </p>
+    <div class='footer-social-links'>
+        <a href='https://github.com/your-profile' target='_blank' title='GitHub Repository'><i class='fab fa-github'></i></a>
+        <a href='https://patreon.com/your-profile' target='_blank' title='Support on Patreon'><i class='fab fa-patreon'></i></a>
+    </div>
+</div>
+""", unsafe_allow_html=True)
