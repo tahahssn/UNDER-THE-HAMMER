@@ -210,6 +210,9 @@ def load_model():
 
 ridge_model, feature_cols, model_ready = load_model()
 
+# ── ALL PLAYER NAMES for autocomplete ─────────────────────────
+ALL_PLAYER_NAMES = sorted(PLAYER_DB.keys())
+
 # ── HEADER ────────────────────────────────────────────────────
 col_title, col_status = st.columns([4, 1])
 with col_title:
@@ -230,36 +233,31 @@ with col_inputs:
     st.markdown("<div class='saffron-accent'>ASSET IDENTITY</div>", unsafe_allow_html=True)
     st.markdown("<h3 style='margin-top:-0.2rem; margin-bottom:1rem;'>Registry Parameters</h3>", unsafe_allow_html=True)
 
-    # ── PLAYER SEARCH ─────────────────────────────────────────
-    srch_col, btn_col = st.columns([3, 1])
-    with srch_col:
-        player_name = st.text_input("Player Name", placeholder="e.g. Babar Azam, Kohli, Russell…")
-    with btn_col:
-        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-        fetch_btn = st.button("AUTO-FILL")
+    # ── LIVE SEARCH — type to filter, select to auto-fill ─────
+    # Sentinel value shown when nothing is selected yet
+    PLACEHOLDER = "Type to search a player"
 
-    # ── AUTO-FILL LOGIC ───────────────────────────────────────
-    if fetch_btn and player_name.strip():
-        matched_name, matched_stats = search_player(player_name)
-        if matched_stats:
-            st.session_state['db_stats']  = matched_stats
-            st.session_state['db_name']   = matched_name
-            st.session_state['db_hit']    = True
-        else:
-            st.session_state['db_hit']    = False
-            st.session_state['db_stats']  = {}
-            st.session_state['db_name']   = None
+    selected_player = st.selectbox(
+        "Player Name",
+        options=[PLACEHOLDER] + ALL_PLAYER_NAMES,
+        index=0,
+        help="Start typing a name — the list filters instantly"
+    )
 
-    db      = st.session_state.get('db_stats', {})
-    db_hit  = st.session_state.get('db_hit', False)
-    db_name = st.session_state.get('db_name', None)
-
-    if db_hit and db_name:
+    # Auto-fill as soon as a real player is chosen
+    if selected_player != PLACEHOLDER:
+        db      = PLAYER_DB[selected_player]
+        db_hit  = True
+        db_name = selected_player
         st.markdown(f"<span class='badge-found'>✓ Loaded — {db_name}</span>", unsafe_allow_html=True)
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    elif fetch_btn and player_name.strip() and not db_hit:
-        st.markdown("<span style='color:#E74C3C; font-size:0.8rem;'>⚠ Player not found — fill manually below</span>", unsafe_allow_html=True)
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    else:
+        db      = {}
+        db_hit  = False
+        db_name = None
+
+    # Expose player_name for ledger display
+    player_name = selected_player if selected_player != PLACEHOLDER else ""
 
     row_meta1, row_meta2 = st.columns(2)
 
@@ -303,16 +301,15 @@ with col_inputs:
     st.markdown("<div class='saffron-accent'>PERFORMANCE TELEMETRY</div>", unsafe_allow_html=True)
     st.markdown("<h3 style='margin-top:-0.2rem; margin-bottom:1.5rem;'>Yield & Output Vectors</h3>", unsafe_allow_html=True)
 
-    # defaults — overridden by DB if hit
-    batting_avg          = db.get("batting_avg")          or 26.5
-    strike_rate          = db.get("strike_rate")          or 132.5
-    bowling_economy      = db.get("bowling_economy")      or 7.6
-    wickets_24m          = db.get("wickets_24m")          or 22
-    wk_dismissals        = db.get("wk_dismissals")        or 1.0
-    t20_runs_default     = db.get("t20_runs")             or 1400
-    recent_form_default  = db.get("recent_form")          or 6
-    finisher_default     = db.get("finisher")             or False
-    playstyle_default    = db.get("playstyle")            or "Balanced / Anchor"
+    batting_avg          = db.get("batting_avg")     or 26.5
+    strike_rate          = db.get("strike_rate")     or 132.5
+    bowling_economy      = db.get("bowling_economy") or 7.6
+    wickets_24m          = db.get("wickets_24m")     or 22
+    wk_dismissals        = db.get("wk_dismissals")   or 1.0
+    t20_runs_default     = db.get("t20_runs")        or 1400
+    recent_form_default  = db.get("recent_form")     or 6
+    finisher_default     = db.get("finisher")        or False
+    playstyle_default    = db.get("playstyle")       or "Balanced / Anchor"
     playstyle_multiplier = 1.0
 
     playstyle_opts = ["Aggressive / Enforcer", "Balanced / Anchor", "Defensive / Accumulator"]
@@ -374,7 +371,7 @@ with col_ledger:
 
     if trigger_valuation:
         if not player_name.strip():
-            st.markdown("<div class='terminal-panel' style='border-left-color:#E74C3C;'><p style='color:#E74C3C !important; margin:0; font-weight:600;'>[ERROR] Execution halted: Null asset signature identifier.</p></div>", unsafe_allow_html=True)
+            st.markdown("<div class='terminal-panel' style='border-left-color:#E74C3C;'><p style='color:#E74C3C !important; margin:0; font-weight:600;'>[ERROR] Execution halted: Select a player from the dropdown first.</p></div>", unsafe_allow_html=True)
         else:
             base_anchor = float(base_price)
             if category == "Platinum": base_anchor += 3.5
@@ -410,7 +407,6 @@ with col_ledger:
 
             net_delta    = calculated_valuation - base_price
             winning_team = PSL_TEAMS[np.random.randint(len(PSL_TEAMS))]
-
             display_name = db_name if (db_hit and db_name) else player_name.strip()
 
             st.markdown(f"""
