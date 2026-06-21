@@ -14,191 +14,51 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght=300;400;500;600;700;900&display=swap');
     @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
-    
-    h1, h2, h3 {
-        font-family: 'Inter', sans-serif !important;
-        font-weight: 900 !important;
-        letter-spacing: -0.04em !important;
-    }
+    h1, h2, h3 { font-family: 'Inter', sans-serif !important; font-weight: 900 !important; letter-spacing: -0.04em !important; }
     * { font-family: 'Inter', sans-serif; }
     .main, .stApp { background-color: #0A0A0A !important; }
-
-    .fintech-card {
-        background: #141414;
-        border-radius: 12px;
-        border: 1px solid #222222;
-        padding: 2rem;
-        margin-bottom: 1.5rem;
-        transition: border-color 0.3s ease;
-    }
+    .fintech-card { background: #141414; border-radius: 12px; border: 1px solid #222222; padding: 2rem; margin-bottom: 1.5rem; transition: border-color 0.3s ease; }
     .fintech-card:hover { border-color: #FF6B00; }
     h1, h2, h3, label, p, span { color: #FFFFFF !important; }
     .stMarkdown p { color: #A0A0A0 !important; }
-
-    .saffron-accent {
-        color: #FF6B00 !important;
-        text-transform: uppercase;
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.15em;
-        margin-bottom: 0.5rem;
-    }
-
-    div[data-baseweb="select"] > div, 
-    div[data-testid="stNumberInput"] input, 
-    div[data-testid="stTextInput"] input {
-        background-color: #0A0A0A !important;
-        border: 1px solid #2A2A2A !important;
-        border-radius: 6px !important;
-        color: #FFFFFF !important;
-    }
-
-    .stButton > button {
-        width: 100%;
-        background: #FF6B00;
-        border: none;
-        border-radius: 6px;
-        padding: 0.9rem;
-        font-weight: 700;
-        font-size: 1rem;
-        color: #000000 !important;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        transition: all 0.2s ease;
-    }
-    .stButton > button:hover {
-        background: #FF852D;
-        box-shadow: 0 8px 20px rgba(255, 107, 0, 0.2);
-    }
-
-    .ledger-block {
-        background: #0E0E0E;
-        border: 1px solid #1A1A1A;
-        border-radius: 12px;
-        padding: 2.5rem;
-        text-align: left;
-        position: relative;
-        overflow: hidden;
-    }
-    .ledger-block::before {
-        content: '';
-        position: absolute;
-        top: 0; left: 0;
-        width: 100%; height: 2px;
-        background: linear-gradient(90deg, #FF6B00, #FFD700);
-    }
-
-    .valuation-headline {
-        font-size: 4.2rem;
-        font-weight: 900;
-        letter-spacing: -0.05em;
-        color: #FFFFFF !important;
-        line-height: 1;
-        margin: 1rem 0;
-    }
-
-    .badge-income {
-        background: rgba(46, 199, 113, 0.1);
-        color: #2EC771 !important;
-        border: 1px solid rgba(46, 199, 113, 0.2);
-        padding: 0.3rem 0.7rem;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    .badge-expense {
-        background: rgba(231, 76, 60, 0.1);
-        color: #E74C3C !important;
-        border: 1px solid rgba(231, 76, 60, 0.2);
-        padding: 0.3rem 0.7rem;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    .badge-gold {
-        background: rgba(255, 215, 0, 0.1);
-        color: #FFD700 !important;
-        border: 1px solid rgba(255, 215, 0, 0.2);
-        padding: 0.3rem 0.7rem;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    .badge-found {
-        background: rgba(255, 107, 0, 0.1);
-        color: #FF6B00 !important;
-        border: 1px solid rgba(255, 107, 0, 0.3);
-        padding: 0.3rem 0.9rem;
-        border-radius: 4px;
-        font-size: 0.8rem;
-        font-weight: 700;
-    }
-    .terminal-panel {
-        background: #0D0D0D;
-        border-radius: 8px;
-        border-left: 3px solid #FF6B00;
-        padding: 1.5rem;
-        margin-top: 1rem;
-    }
+    .saffron-accent { color: #FF6B00 !important; text-transform: uppercase; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.15em; margin-bottom: 0.5rem; }
+    div[data-baseweb="select"] > div, div[data-testid="stNumberInput"] input, div[data-testid="stTextInput"] input { background-color: #0A0A0A !important; border: 1px solid #2A2A2A !important; border-radius: 6px !important; color: #FFFFFF !important; }
+    .stButton > button { width: 100%; background: #FF6B00; border: none; border-radius: 6px; padding: 0.9rem; font-weight: 700; font-size: 1rem; color: #000000 !important; letter-spacing: 0.05em; text-transform: uppercase; transition: all 0.2s ease; }
+    .stButton > button:hover { background: #FF852D; box-shadow: 0 8px 20px rgba(255, 107, 0, 0.2); }
+    .ledger-block { background: #0E0E0E; border: 1px solid #1A1A1A; border-radius: 12px; padding: 2.5rem; text-align: left; position: relative; overflow: hidden; }
+    .ledger-block::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, #FF6B00, #FFD700); }
+    .valuation-headline { font-size: 4.2rem; font-weight: 900; letter-spacing: -0.05em; color: #FFFFFF !important; line-height: 1; margin: 1rem 0; }
+    .badge-income { background: rgba(46, 199, 113, 0.1); color: #2EC771 !important; border: 1px solid rgba(46, 199, 113, 0.2); padding: 0.3rem 0.7rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-expense { background: rgba(231, 76, 60, 0.1); color: #E74C3C !important; border: 1px solid rgba(231, 76, 60, 0.2); padding: 0.3rem 0.7rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-gold { background: rgba(255, 215, 0, 0.1); color: #FFD700 !important; border: 1px solid rgba(255, 215, 0, 0.2); padding: 0.3rem 0.7rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-found { background: rgba(255, 107, 0, 0.1); color: #FF6B00 !important; border: 1px solid rgba(255, 107, 0, 0.3); padding: 0.3rem 0.9rem; border-radius: 4px; font-size: 0.8rem; font-weight: 700; }
+    .badge-manual { background: rgba(100, 100, 255, 0.1); color: #8888ff !important; border: 1px solid rgba(100, 100, 255, 0.3); padding: 0.3rem 0.9rem; border-radius: 4px; font-size: 0.8rem; font-weight: 700; }
+    .terminal-panel { background: #0D0D0D; border-radius: 8px; border-left: 3px solid #FF6B00; padding: 1.5rem; margin-top: 1rem; }
     hr { border-color: #1F1F1F; }
-
-    .sold-to-block {
-        margin-top: 1.8rem;
-        padding-top: 1.5rem;
-        border-top: 1px solid #1A1A1A;
-    }
-    .sold-to-label {
-        font-size: 0.7rem;
-        letter-spacing: 0.18em;
-        text-transform: uppercase;
-        color: #444444;
-        margin-bottom: 10px;
-        font-weight: 700;
-    }
-    .team-dot {
-        width: 10px; height: 10px;
-        border-radius: 50%;
-        flex-shrink: 0;
-        display: inline-block;
-        margin-right: 10px;
-        animation: pulse-dot 2s infinite;
-    }
-    @keyframes pulse-dot {
-        0%, 100% { opacity: 1; transform: scale(1); }
-        50%       { opacity: 0.6; transform: scale(1.3); }
-    }
-
+    .sold-to-block { margin-top: 1.8rem; padding-top: 1.5rem; border-top: 1px solid #1A1A1A; }
+    .sold-to-label { font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase; color: #444444; margin-bottom: 10px; font-weight: 700; }
+    .team-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; display: inline-block; margin-right: 10px; animation: pulse-dot 2s infinite; }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.3); } }
     .footer-container { text-align: center; padding-bottom: 0.5rem; }
-    .footer-social-links {
-        display: flex; justify-content: center;
-        gap: 1.5rem; margin-top: 1rem;
-    }
-    .footer-social-links a {
-        color: #444444 !important;
-        font-size: 2.0rem;
-        transition: all 0.3s ease;
-        text-decoration: none;
-    }
-    .footer-social-links a:hover {
-        color: #FF6B00 !important;
-        transform: translateY(-2px);
-    }
+    .footer-social-links { display: flex; justify-content: center; gap: 1.5rem; margin-top: 1rem; }
+    .footer-social-links a { color: #444444 !important; font-size: 2.0rem; transition: all 0.3s ease; text-decoration: none; }
+    .footer-social-links a:hover { color: #FF6B00 !important; transform: translateY(-2px); }
+    .mode-toggle { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .divider-text { color: #444 !important; font-size: 0.75rem; text-align: center; margin: 0.5rem 0; letter-spacing: 0.1em; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── PSL TEAMS ─────────────────────────────────────────────────
 PSL_TEAMS = [
-    {"name": "Karachi Kings",      "color": "#00A2E8"},
-    {"name": "Lahore Qalandars",   "color": "#75F94D"},
-    {"name": "Quetta Gladiators",  "color": "#EE8AF8"},
-    {"name": "Rawalpindi Express", "color": "#FF8F35"},
-    {"name": "Multan Sultans",     "color": "#22FFA8"},
-    {"name": "Peshawar Zalmi",     "color": "#FFC90E"},
-    {"name": "Islamabad United",   "color": "#FF1D1D"},
-    {"name": "Hyderabad Kingsmen", "color": "#870015"},
+    {"name": "Karachi Kings",      "color": "#00A2E8", "weight": 12.5},
+    {"name": "Lahore Qalandars",   "color": "#75F94D", "weight": 12.5},
+    {"name": "Quetta Gladiators",  "color": "#EE8AF8", "weight": 12.5},
+    {"name": "Rawalpindi Express", "color": "#FF8F35", "weight": 12.5},
+    {"name": "Multan Sultans",     "color": "#22FFA8", "weight": 12.5},
+    {"name": "Peshawar Zalmi",     "color": "#FFC90E", "weight": 12.5},
+    {"name": "Islamabad United",   "color": "#FF1D1D", "weight": 12.5},
+    {"name": "Hyderabad Kingsmen", "color": "#870015", "weight": 12.5},
 ]
 
-# ── LOAD MODEL ────────────────────────────────────────────────
 @st.cache_resource
 def load_model():
     try:
@@ -209,8 +69,6 @@ def load_model():
         return None, None, False
 
 ridge_model, feature_cols, model_ready = load_model()
-
-# ── ALL PLAYER NAMES for autocomplete ─────────────────────────
 ALL_PLAYER_NAMES = sorted(PLAYER_DB.keys())
 
 # ── HEADER ────────────────────────────────────────────────────
@@ -225,7 +83,6 @@ with col_status:
 
 st.markdown("<hr style='margin-top:0.5rem; margin-bottom:2rem;'>", unsafe_allow_html=True)
 
-# ── LAYOUT ────────────────────────────────────────────────────
 col_inputs, col_ledger = st.columns([1.1, 0.9], gap="large")
 
 with col_inputs:
@@ -233,31 +90,45 @@ with col_inputs:
     st.markdown("<div class='saffron-accent'>ASSET IDENTITY</div>", unsafe_allow_html=True)
     st.markdown("<h3 style='margin-top:-0.2rem; margin-bottom:1rem;'>Registry Parameters</h3>", unsafe_allow_html=True)
 
-    # ── LIVE SEARCH — type to filter, select to auto-fill ─────
-    # Sentinel value shown when nothing is selected yet
-    PLACEHOLDER = "Type to search a player"
-
-    selected_player = st.selectbox(
-        "Player Name",
-        options=[PLACEHOLDER] + ALL_PLAYER_NAMES,
-        index=0,
-        help="Start typing a name — the list filters instantly"
+    # ── MODE TOGGLE ───────────────────────────────────────────
+    mode = st.radio(
+        "Player Entry Mode",
+        options=["Browse Roster", "Unlisted Player"],
+        horizontal=True,
+        label_visibility="collapsed"
     )
 
-    # Auto-fill as soon as a real player is chosen
-    if selected_player != PLACEHOLDER:
-        db      = PLAYER_DB[selected_player]
-        db_hit  = True
-        db_name = selected_player
-        st.markdown(f"<span class='badge-found'>✓ Loaded — {db_name}</span>", unsafe_allow_html=True)
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    else:
-        db      = {}
-        db_hit  = False
-        db_name = None
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
-    # Expose player_name for ledger display
-    player_name = selected_player if selected_player != PLACEHOLDER else ""
+    PLACEHOLDER = "Type to search a player"
+
+    if mode == "Browse Roster":
+        selected_player = st.selectbox(
+            "Player Name",
+            options=[PLACEHOLDER] + ALL_PLAYER_NAMES,
+            index=0,
+            help="Start typing — list filters instantly"
+        )
+        if selected_player != PLACEHOLDER:
+            db       = PLAYER_DB[selected_player]
+            db_hit   = True
+            db_name  = selected_player
+            player_name = selected_player
+            st.markdown(f"<span class='badge-found'>✓ Loaded — {db_name}</span>", unsafe_allow_html=True)
+        else:
+            db = {}; db_hit = False; db_name = None; player_name = ""
+
+    else:  # Custom player
+        player_name = st.text_input(
+            "Player Name",
+            placeholder="e.g. Ali Raza, Jorden Cox, any player…",
+            help="Enter any player name fill their stats manually below"
+        )
+        db = {}; db_hit = False; db_name = None
+        if player_name.strip():
+            st.markdown("<span class='badge-manual'>Manual Mode — fill stats below</span>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
     row_meta1, row_meta2 = st.columns(2)
 
@@ -265,8 +136,8 @@ with col_inputs:
     cat_options    = ["Platinum", "Diamond", "Gold", "Emerging"]
     role_options   = ["Batter", "Bowler", "All-rounder", "Wicket-keeper Batter"]
 
-    db_cat  = db.get("category", "Gold")
-    db_role = db.get("player_type", "Batter")
+    db_cat      = db.get("category",     "Gold")
+    db_role     = db.get("player_type",  "Batter")
     db_cat_idx  = cat_options.index(db_cat)  if db_cat  in cat_options  else 2
     db_role_idx = role_options.index(db_role) if db_role in role_options else 0
 
@@ -301,15 +172,16 @@ with col_inputs:
     st.markdown("<div class='saffron-accent'>PERFORMANCE TELEMETRY</div>", unsafe_allow_html=True)
     st.markdown("<h3 style='margin-top:-0.2rem; margin-bottom:1.5rem;'>Yield & Output Vectors</h3>", unsafe_allow_html=True)
 
-    batting_avg          = db.get("batting_avg")     or 26.5
-    strike_rate          = db.get("strike_rate")     or 132.5
-    bowling_economy      = db.get("bowling_economy") or 7.6
-    wickets_24m          = db.get("wickets_24m")     or 22
-    wk_dismissals        = db.get("wk_dismissals")   or 1.0
-    t20_runs_default     = db.get("t20_runs")        or 1400
-    recent_form_default  = db.get("recent_form")     or 6
-    finisher_default     = db.get("finisher")        or False
-    playstyle_default    = db.get("playstyle")       or "Balanced / Anchor"
+    # defaults — overridden by DB if known player
+    batting_avg         = db.get("batting_avg")     or 26.5
+    strike_rate         = db.get("strike_rate")     or 132.5
+    bowling_economy     = db.get("bowling_economy") or 7.6
+    wickets_24m         = db.get("wickets_24m")     or 22
+    wk_dismissals       = db.get("wk_dismissals")   or 1.0
+    t20_runs_default    = db.get("t20_runs")        or 1400
+    recent_form_default = db.get("recent_form")     or 6
+    finisher_default    = db.get("finisher")        or False
+    playstyle_default   = db.get("playstyle")       or "Balanced / Anchor"
     playstyle_multiplier = 1.0
 
     playstyle_opts = ["Aggressive / Enforcer", "Balanced / Anchor", "Defensive / Accumulator"]
@@ -371,7 +243,7 @@ with col_ledger:
 
     if trigger_valuation:
         if not player_name.strip():
-            st.markdown("<div class='terminal-panel' style='border-left-color:#E74C3C;'><p style='color:#E74C3C !important; margin:0; font-weight:600;'>[ERROR] Execution halted: Select a player from the dropdown first.</p></div>", unsafe_allow_html=True)
+            st.markdown("<div class='terminal-panel' style='border-left-color:#E74C3C;'><p style='color:#E74C3C !important; margin:0; font-weight:600;'>[ERROR] Execution halted: Enter or select a player name first.</p></div>", unsafe_allow_html=True)
         else:
             base_anchor = float(base_price)
             if category == "Platinum": base_anchor += 3.5
@@ -406,7 +278,8 @@ with col_ledger:
                 calculated_valuation = base_price
 
             net_delta    = calculated_valuation - base_price
-            winning_team = PSL_TEAMS[np.random.randint(len(PSL_TEAMS))]
+            weights = [t["weight"] for t in PSL_TEAMS]
+            winning_team = PSL_TEAMS[np.random.choice(len(PSL_TEAMS), p=np.array(weights)/sum(weights))]
             display_name = db_name if (db_hit and db_name) else player_name.strip()
 
             st.markdown(f"""
@@ -456,7 +329,6 @@ with col_ledger:
         </div>
         """, unsafe_allow_html=True)
 
-# ── FOOTER ────────────────────────────────────────────────────
 st.markdown("<hr style='margin-top:2rem; margin-bottom:1rem;'>", unsafe_allow_html=True)
 st.markdown("""
 <div class='footer-container'>
