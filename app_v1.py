@@ -36,7 +36,7 @@ st.markdown("""
     .terminal-panel { background: #0D0D0D; border-radius: 8px; border-left: 3px solid #FF6B00; padding: 1.5rem; margin-top: 1rem; }
     hr { border-color: #1F1F1F; }
     .sold-to-block { margin-top: 1.8rem; padding-top: 1.5rem; border-top: 1px solid #1A1A1A; }
-    .sold-to-label { font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase; color: #444444; margin-bottom: 10px; font-weight: 700; }
+    .sold-to-label { font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase; color: #666666; margin-bottom: 10px; font-weight: 700; }
     .team-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; display: inline-block; margin-right: 10px; animation: pulse-dot 2s infinite; }
     @keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.3); } }
     .footer-container { text-align: center; padding-bottom: 0.5rem; }
@@ -316,7 +316,7 @@ with col_ledger:
                         <span class='team-dot' style='background:{winning_team["color"]};'></span>
                         <span style='font-size:1.45rem; font-weight:900; color:{winning_team["color"]};'>{winning_team["name"]}</span>
                     </div>
-                    <div style='font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:#444; margin-top:5px; margin-left:20px;'>
+                    <div style='font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:#666666; margin-top:5px; margin-left:20px;'>
                         Winning bid · PKR {calculated_valuation:.2f} Crore
                     </div>
                 </div>
