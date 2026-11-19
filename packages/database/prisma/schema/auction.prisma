@@ -1,0 +1,310 @@
+// Authoritative auction state. Money is stored as integer minor units (BigInt) with a currency.
+// Bids, acquisitions and events are relational and append-oriented. Never overwrite settled history.
+
+enum AuctionPhase {
+  DRAFT
+  REGISTRATION
+  READY
+  LIVE
+  PLAYER_INTRODUCTION
+  BIDDING
+  BREAK
+  SETTLEMENT
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum ControlMode {
+  HOST_CONTROLLED
+  SYSTEM_AUTOMATIC
+}
+
+enum AuctionFormat {
+  LIVE_COUNTDOWN
+  TURN_BASED
+}
+
+enum PlayerSelectionMode {
+  MANUAL
+  AUTOMATIC_DRAW
+}
+
+enum BreakCounterScope {
+  PER_PLAYER
+  PER_AUCTION
+}
+
+model Auction {
+  id            String              @id @default(uuid()) @db.Uuid
+  roomId        String              @unique @db.Uuid
+  phase         AuctionPhase        @default(DRAFT)
+  // Phase the auction returned to after PAUSED
+  resumePhase   AuctionPhase?
+  controlMode   ControlMode
+  format        AuctionFormat
+  selectionMode PlayerSelectionMode
+  hostParticipates Boolean          @default(false)
+  currency      String              @db.Char(3)
+  // Optimistic concurrency version, incremented on every committed state change
+  stateVersion  Int                 @default(0)
+  // Last assigned event sequence
+  eventSequence Int                 @default(0)
+  currentAuctionPlayerId String?    @unique @db.Uuid
+  phaseStartedAt DateTime?
+  // Server-authoritative deadline for the current timed phase
+  phaseDeadline DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  room             AuctionRoom                   @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  currentPlayer    AuctionPlayer?                @relation("CurrentPlayer", fields: [currentAuctionPlayerId], references: [id], onDelete: SetNull)
+  configSnapshot   AuctionConfigurationSnapshot?
+  categoryPrices   AuctionCategoryPrice[]
+  incrementBrackets AuctionIncrementBracket[]
+  players          AuctionPlayer[]               @relation("AuctionPlayers")
+  teams            AuctionTeam[]
+  owners           TeamOwner[]
+  squadRules       SquadRule[]
+  events           AuctionEvent[]
+  bids             Bid[]
+  acquisitions     PlayerAcquisition[]
+  hostActions      AuctionHostAction[]
+  breaks           AuctionBreak[]
+  connections      AuctionParticipantConnection[]
+
+  @@index([phase])
+}
+
+// Frozen at auction start so later edits cannot change a running auction.
+model AuctionConfigurationSnapshot {
+  auctionId  String   @id @db.Uuid
+  settingsVersion Int
+  breakEveryAcceptedBids Int?
+  breakCounterScope BreakCounterScope?
+  breakDurationSeconds  Int?
+  breakMinSeconds Int?
+  breakMaxSeconds Int?
+  countdownSeconds Int?
+  countdownExtensionSeconds Int?
+  turnSeconds Int?
+  // Turn policy fields stay null until decision D-06 is approved
+  turnPolicy Json?
+  // Remaining flexible settings, validated by shared schemas
+  extra      Json?
+  createdAt  DateTime @default(now())
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+}
+
+model AuctionCategoryPrice {
+  id            String @id @default(uuid()) @db.Uuid
+  auctionId     String @db.Uuid
+  categoryId    String @db.Uuid
+  basePriceMinor BigInt
+
+  auction  Auction        @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  category PlayerCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@unique([auctionId, categoryId])
+}
+
+// Bracket boundaries carry explicit inclusivity because the PKR 4 crore boundary is undecided (D-04).
+model AuctionIncrementBracket {
+  id             String  @id @default(uuid()) @db.Uuid
+  auctionId      String  @db.Uuid
+  sortOrder      Int
+  fromMinor      BigInt
+  fromInclusive  Boolean @default(true)
+  // Null means no upper bound
+  toMinor        BigInt?
+  toInclusive    Boolean @default(false)
+  incrementMinor BigInt
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+
+  @@unique([auctionId, sortOrder])
+}
+
+enum AuctionPlayerStatus {
+  QUEUED
+  ACTIVE
+  SOLD
+  UNSOLD
+  WITHDRAWN
+}
+
+enum SelectionSource {
+  HOST_PICK
+  SYSTEM_DRAW
+  IMPORT
+}
+
+model AuctionPlayer {
+  id             String              @id @default(uuid()) @db.Uuid
+  auctionId      String              @db.Uuid
+  playerId       String              @db.Uuid
+  categoryId     String?             @db.Uuid
+  basePriceMinor BigInt
+  // Overseas status under THIS auction's rules, not inferred from nationality alone
+  isOverseas     Boolean             @default(false)
+  status         AuctionPlayerStatus @default(QUEUED)
+  queuePosition  Int?
+  selectionSource SelectionSource?
+  currentBidMinor BigInt?
+  leadingAuctionTeamId String?       @db.Uuid
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  auction     Auction         @relation("AuctionPlayers", fields: [auctionId], references: [id], onDelete: Cascade)
+  player      Player          @relation(fields: [playerId], references: [id], onDelete: Restrict)
+  category    PlayerCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  leadingTeam AuctionTeam?    @relation("LeadingTeam", fields: [leadingAuctionTeamId], references: [id], onDelete: SetNull)
+  currentFor  Auction?        @relation("CurrentPlayer")
+  bids        Bid[]
+  acquisition PlayerAcquisition?
+  turns       AuctionTurn[]
+
+  @@unique([auctionId, playerId])
+  @@index([auctionId, status, queuePosition])
+}
+
+enum BidStatus {
+  ACCEPTED
+  REJECTED
+}
+
+model Bid {
+  id             String    @id @default(uuid()) @db.Uuid
+  auctionId      String    @db.Uuid
+  auctionPlayerId String   @db.Uuid
+  auctionTeamId  String    @db.Uuid
+  placedById     String    @db.Uuid
+  amountMinor    BigInt
+  status         BidStatus
+  // Deterministic rejection code for REJECTED bids
+  rejectionCode  String?
+  idempotencyKey String
+  // Event sequence assigned at commit. Null only for rejected bids that produce no event.
+  sequence       Int?
+  stateVersion   Int
+  createdAt      DateTime  @default(now())
+
+  auction       Auction            @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  auctionPlayer AuctionPlayer      @relation(fields: [auctionPlayerId], references: [id], onDelete: Restrict)
+  auctionTeam   AuctionTeam        @relation(fields: [auctionTeamId], references: [id], onDelete: Restrict)
+  placedBy      User               @relation(fields: [placedById], references: [id], onDelete: Restrict)
+  acquisition   PlayerAcquisition?
+
+  @@unique([auctionId, idempotencyKey])
+  @@index([auctionPlayerId, sequence])
+  @@index([auctionTeamId])
+}
+
+// One winning acquisition per auction player (unique auctionPlayerId).
+model PlayerAcquisition {
+  id              String   @id @default(uuid()) @db.Uuid
+  auctionId       String   @db.Uuid
+  auctionPlayerId String   @unique @db.Uuid
+  auctionTeamId   String   @db.Uuid
+  winningBidId    String   @unique @db.Uuid
+  priceMinor      BigInt
+  settledAt       DateTime @default(now())
+
+  auction       Auction       @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  auctionPlayer AuctionPlayer @relation(fields: [auctionPlayerId], references: [id], onDelete: Restrict)
+  auctionTeam   AuctionTeam   @relation(fields: [auctionTeamId], references: [id], onDelete: Restrict)
+  winningBid    Bid           @relation(fields: [winningBidId], references: [id], onDelete: Restrict)
+  purseTransactions TeamPurseTransaction[]
+
+  @@index([auctionTeamId])
+  @@index([auctionId])
+}
+
+// Ordered, append-only history. (auctionId, sequence) is unique.
+model AuctionEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  auctionId    String   @db.Uuid
+  sequence     Int
+  stateVersion Int
+  type         String
+  actorId      String?  @db.Uuid
+  payload      Json
+  occurredAt   DateTime @default(now())
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@unique([auctionId, sequence])
+  @@index([auctionId, type])
+}
+
+model AuctionHostAction {
+  id        String   @id @default(uuid()) @db.Uuid
+  auctionId String   @db.Uuid
+  actorId   String   @db.Uuid
+  action    String
+  reason    String?
+  params    Json?
+  createdAt DateTime @default(now())
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  actor   User    @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([auctionId, createdAt])
+}
+
+enum TurnAction {
+  RAISE
+  PASS
+  TIMEOUT
+}
+
+model AuctionTurn {
+  id              String      @id @default(uuid()) @db.Uuid
+  auctionPlayerId String      @db.Uuid
+  auctionTeamId   String      @db.Uuid
+  turnNo          Int
+  deadline        DateTime
+  action          TurnAction?
+  actedAt         DateTime?
+
+  auctionPlayer AuctionPlayer @relation(fields: [auctionPlayerId], references: [id], onDelete: Cascade)
+  auctionTeam   AuctionTeam   @relation(fields: [auctionTeamId], references: [id], onDelete: Restrict)
+
+  @@unique([auctionPlayerId, turnNo])
+}
+
+model AuctionBreak {
+  id                 String    @id @default(uuid()) @db.Uuid
+  auctionId          String    @db.Uuid
+  startedAt          DateTime
+  deadline           DateTime
+  originalDurationSeconds Int
+  reason             String
+  triggerBidCount    Int?
+  endedAt            DateTime?
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+
+  @@index([auctionId, startedAt])
+}
+
+model AuctionParticipantConnection {
+  id             String    @id @default(uuid()) @db.Uuid
+  roomId         String    @db.Uuid
+  auctionId      String?   @db.Uuid
+  userId         String    @db.Uuid
+  socketId       String
+  connectedAt    DateTime  @default(now())
+  disconnectedAt DateTime?
+
+  room    AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  auction Auction?    @relation(fields: [auctionId], references: [id], onDelete: SetNull)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, disconnectedAt])
+  @@index([userId])
+}

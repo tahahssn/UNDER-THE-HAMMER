@@ -1,0 +1,126 @@
+// Reusable team identity and uploaded files. Auction-specific state lives in AuctionTeam.
+
+enum FileAssetStatus {
+  PENDING_UPLOAD
+  PROCESSING
+  READY
+  REJECTED
+  DISABLED
+  DELETED
+}
+
+enum FileAssetKind {
+  TEAM_LOGO
+  USER_AVATAR
+  EXPORT_IMAGE
+}
+
+model FileAsset {
+  id          String          @id @default(uuid()) @db.Uuid
+  kind        FileAssetKind
+  status      FileAssetStatus @default(PENDING_UPLOAD)
+  // S3 object key only. Never an arbitrary remote URL.
+  objectKey   String
+  bucket      String
+  contentType String?
+  sizeBytes   BigInt?
+  width       Int?
+  height      Int?
+  sha256      String?
+  uploadedById String?        @db.Uuid
+  // Uploader confirmed they have rights to use the asset
+  rightsConfirmedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  uploadedBy  User?                 @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  teamAssets  TeamAsset[]
+  currentLogoFor Team[] @relation("CurrentLogo")
+  profiles    UserProfile[]
+  cases       AssetModerationCase[]
+
+  @@unique([bucket, objectKey])
+  @@index([uploadedById])
+  @@index([status])
+}
+
+enum TeamStatus {
+  ACTIVE
+  ARCHIVED
+  DISABLED
+}
+
+model Team {
+  id             String     @id @default(uuid()) @db.Uuid
+  createdById    String     @db.Uuid
+  name           String
+  shortName      String
+  description    String?
+  primaryColor   String     @db.VarChar(9)
+  secondaryColor String?    @db.VarChar(9)
+  countryCode    String?    @db.Char(2)
+  status         TeamStatus @default(ACTIVE)
+  currentLogoAssetId String? @db.Uuid
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  createdBy User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  currentLogo FileAsset? @relation("CurrentLogo", fields: [currentLogoAssetId], references: [id], onDelete: SetNull)
+  members   TeamMember[]
+  assets    TeamAsset[]
+  auctionTeams AuctionTeam[]
+
+  @@index([createdById])
+  @@index([status])
+}
+
+model TeamMember {
+  teamId String @db.Uuid
+  userId String @db.Uuid
+  role   String @default("MANAGER")
+  addedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+}
+
+// History of logos per team, so replacing a logo never damages past auctions.
+model TeamAsset {
+  id        String   @id @default(uuid()) @db.Uuid
+  teamId    String   @db.Uuid
+  assetId   String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  team  Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  asset FileAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([teamId, assetId])
+}
+
+enum AssetCaseStatus {
+  OPEN
+  ACTION_TAKEN
+  DISMISSED
+}
+
+model AssetModerationCase {
+  id           String          @id @default(uuid()) @db.Uuid
+  assetId      String          @db.Uuid
+  // COPYRIGHT, TRADEMARK, POLICY, OTHER
+  reason       String
+  complaintText String?
+  complainantEmail String?
+  status       AssetCaseStatus @default(OPEN)
+  outcome      String?
+  resolvedById String?         @db.Uuid
+  createdAt    DateTime        @default(now())
+  resolvedAt   DateTime?
+
+  asset      FileAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  resolvedBy User?     @relation(fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([assetId])
+  @@index([status])
+}

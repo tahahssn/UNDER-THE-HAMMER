@@ -1,0 +1,131 @@
+// Identity and users. Internal User.id is the primary key. Email is mutable and never a key.
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  BANNED
+  DISABLED
+  DELETED
+}
+
+enum IdentityProvider {
+  COGNITO_PASSWORD
+  COGNITO_GOOGLE
+}
+
+model User {
+  id            String     @id @default(uuid()) @db.Uuid
+  status        UserStatus @default(PENDING_VERIFICATION)
+  email         String?
+  emailVerified Boolean    @default(false)
+  username      String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  identities              UserIdentity[]
+  profile                 UserProfile?
+  notificationPreferences UserNotificationPreference[]
+
+  staffRoles        StaffUserRole[]  @relation("StaffRoleHolder")
+  staffRolesGranted StaffUserRole[]  @relation("StaffRoleGranter")
+
+  teamsCreated      Team[]
+  teamMemberships   TeamMember[]
+  filesUploaded     FileAsset[]
+  assetCasesHandled AssetModerationCase[]
+
+  articlesReviewed NewsArticle[]
+
+  tournamentsOrganized Tournament[]
+  tournamentMemberships TournamentMember[]
+  roomsHosted          AuctionRoom[]
+  roomMemberships      RoomMember[]
+  invitationsCreated   RoomInvitation[] @relation("InvitationCreator")
+  invitationsReceived  RoomInvitation[] @relation("InvitationInvitee")
+  roomBans             RoomBan[]        @relation("BannedUser")
+  roomBansIssued       RoomBan[]        @relation("BanIssuer")
+
+  hostActions       AuctionHostAction[]
+  auctionEvents     AuctionEvent[]
+  bidsPlaced        Bid[]
+  teamOwnerships    TeamOwner[]
+  purseTransactions TeamPurseTransaction[]
+  connections       AuctionParticipantConnection[]
+
+  chatMessages         RoomChatMessage[]
+  moderationActions    ChatModerationAction[] @relation("ModerationActor")
+  moderationTargets    ChatModerationAction[] @relation("ModerationTarget")
+  externalLinksPosted  RoomExternalLink[]
+  messageReports       MessageReport[]
+
+  subscriptions Subscription[]
+  payments      Payment[]
+  refundsRequested Refund[]
+
+  notifications        Notification[]
+  supportCasesRequested SupportCase[]        @relation("SupportRequester")
+  supportCasesAssigned  SupportCase[]        @relation("SupportAssignee")
+  supportMessages       SupportCaseMessage[]
+  reportsFiled          UserReport[]         @relation("ReportFiler")
+  reportsAgainst        UserReport[]         @relation("ReportTarget")
+  appeals               Appeal[]
+  announcements         Announcement[]
+  maintenanceNotices    MaintenanceNotice[]
+
+  auditLogs          AuditLog[]
+  adminActions       AdminAction[]
+  adminApprovals     AdminActionApproval[]
+
+  @@unique([email])
+  @@unique([username])
+  @@index([status])
+}
+
+model UserIdentity {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  provider  IdentityProvider
+  // Stable Cognito subject (`sub`). Unique per provider.
+  subject   String
+  createdAt DateTime         @default(now())
+  lastLoginAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, subject])
+  @@index([userId])
+}
+
+model UserProfile {
+  userId      String   @id @db.Uuid
+  displayName String
+  avatarAssetId String? @db.Uuid
+  locale      String?
+  timezone    String?
+  countryCode String?  @db.Char(2)
+  updatedAt   DateTime @updatedAt
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  avatarAsset FileAsset? @relation(fields: [avatarAssetId], references: [id], onDelete: SetNull)
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+model UserNotificationPreference {
+  id       String              @id @default(uuid()) @db.Uuid
+  userId   String              @db.Uuid
+  // e.g. AUCTION_INVITE, AUCTION_REMINDER, BILLING, SUPPORT, MARKETING
+  category String
+  channel  NotificationChannel
+  enabled  Boolean             @default(true)
+  // Consent timestamp, required before enabling MARKETING
+  consentedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, channel])
+}

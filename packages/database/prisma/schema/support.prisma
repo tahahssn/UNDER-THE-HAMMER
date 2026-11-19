@@ -1,0 +1,157 @@
+// Notifications, support, reports, appeals and announcements.
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  category  String
+  title     String
+  body      String?
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@index([userId, readAt, createdAt])
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model NotificationDelivery {
+  id             String              @id @default(uuid()) @db.Uuid
+  notificationId String              @db.Uuid
+  channel        NotificationChannel
+  status         DeliveryStatus      @default(PENDING)
+  attempts       Int                 @default(0)
+  sentAt         DateTime?
+  error          String?
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel])
+}
+
+enum SupportCaseStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_USER
+  RESOLVED
+  CLOSED
+}
+
+enum CasePriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model SupportCase {
+  id               String            @id @default(uuid()) @db.Uuid
+  requesterId      String            @db.Uuid
+  assigneeId       String?           @db.Uuid
+  category         String
+  priority         CasePriority      @default(NORMAL)
+  status           SupportCaseStatus @default(OPEN)
+  subject          String
+  resolutionReason String?
+  createdAt        DateTime          @default(now())
+  resolvedAt       DateTime?
+
+  requester User                 @relation("SupportRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  assignee  User?                @relation("SupportAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  messages  SupportCaseMessage[]
+
+  @@index([status, priority])
+  @@index([assigneeId, status])
+}
+
+model SupportCaseMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  caseId    String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  // Internal notes are hidden from the requester
+  internal  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  supportCase SupportCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  author      User        @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, createdAt])
+}
+
+model UserReport {
+  id           String       @id @default(uuid()) @db.Uuid
+  reporterId   String       @db.Uuid
+  targetUserId String       @db.Uuid
+  roomId       String?      @db.Uuid
+  reason       String
+  details      String?
+  status       ReportStatus @default(OPEN)
+  createdAt    DateTime     @default(now())
+
+  reporter User         @relation("ReportFiler", fields: [reporterId], references: [id], onDelete: Restrict)
+  target   User         @relation("ReportTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  room     AuctionRoom? @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([targetUserId])
+}
+
+enum AppealStatus {
+  OPEN
+  UPHELD
+  OVERTURNED
+}
+
+model Appeal {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @db.Uuid
+  adminActionId  String?      @db.Uuid
+  reason         String
+  status         AppealStatus @default(OPEN)
+  decisionNote   String?
+  createdAt      DateTime     @default(now())
+  decidedAt      DateTime?
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  adminAction AdminAction? @relation(fields: [adminActionId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+enum AnnouncementKind {
+  ANNOUNCEMENT
+  RELEASE_NOTE
+}
+
+model Announcement {
+  id          String           @id @default(uuid()) @db.Uuid
+  kind        AnnouncementKind
+  title       String
+  body        String
+  // Audience description recorded for audit. Null means all users.
+  audience    Json?
+  publishedAt DateTime?
+  createdById String           @db.Uuid
+  createdAt   DateTime         @default(now())
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+}
+
+model MaintenanceNotice {
+  id          String   @id @default(uuid()) @db.Uuid
+  message     String
+  startsAt    DateTime
+  endsAt      DateTime?
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+}

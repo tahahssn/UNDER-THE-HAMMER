@@ -1,0 +1,17 @@
+{
+  "name": "under-the-hammer",
+  "private": true,
+  "description": "Cricket information and multiplayer auction platform",
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:validate": "pnpm --filter @uth/database validate",
+    "db:migrate": "pnpm --filter @uth/database migrate:dev",
+    "db:seed": "pnpm --filter @uth/database seed"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

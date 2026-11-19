@@ -1,0 +1,119 @@
+// Auction-specific teams, owners, purse ledger and squad rules.
+// AuctionTeam is NOT the reusable Team. It owns this auction's purse and squad state.
+
+enum AllocationMethod {
+  USER_SELECTED
+  RANDOM
+  CUSTOM
+  HOST_ASSIGNED
+}
+
+model AuctionTeam {
+  id                 String           @id @default(uuid()) @db.Uuid
+  auctionId          String           @db.Uuid
+  teamId             String           @db.Uuid
+  slotIndex          Int
+  allocationMethod   AllocationMethod?
+  purseInitialMinor  BigInt
+  // Derived from the ledger. A CHECK constraint (added in migration SQL) forbids negative values.
+  purseBalanceMinor  BigInt
+  createdAt          DateTime         @default(now())
+
+  auction      Auction              @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  team         Team                 @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  owners       TeamOwner[]
+  purseLedger  TeamPurseTransaction[]
+  acquisitions PlayerAcquisition[]
+  bids         Bid[]
+  turns        AuctionTurn[]
+  leading      AuctionPlayer[]      @relation("LeadingTeam")
+  progress     SquadRequirementProgress[]
+
+  @@unique([auctionId, teamId])
+  @@unique([auctionId, slotIndex])
+}
+
+model TeamOwner {
+  id            String           @id @default(uuid()) @db.Uuid
+  auctionId     String           @db.Uuid
+  auctionTeamId String           @db.Uuid
+  userId        String           @db.Uuid
+  method        AllocationMethod
+  assignedAt    DateTime         @default(now())
+  releasedAt    DateTime?
+
+  auction     Auction     @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  auctionTeam AuctionTeam @relation(fields: [auctionTeamId], references: [id], onDelete: Restrict)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([auctionTeamId, releasedAt])
+  @@index([auctionId, userId, releasedAt])
+}
+
+enum PurseTransactionType {
+  INITIAL_CREDIT
+  ACQUISITION_DEBIT
+  ADJUSTMENT_CREDIT
+  ADJUSTMENT_DEBIT
+  REVERSAL
+}
+
+// Append-only. Corrections are new compensating rows.
+model TeamPurseTransaction {
+  id                String               @id @default(uuid()) @db.Uuid
+  auctionTeamId     String               @db.Uuid
+  type              PurseTransactionType
+  // Signed amount: credits positive, debits negative
+  amountMinor       BigInt
+  balanceAfterMinor BigInt
+  acquisitionId     String?              @db.Uuid
+  reason            String?
+  createdById       String?              @db.Uuid
+  createdAt         DateTime             @default(now())
+
+  auctionTeam AuctionTeam        @relation(fields: [auctionTeamId], references: [id], onDelete: Restrict)
+  acquisition PlayerAcquisition? @relation(fields: [acquisitionId], references: [id], onDelete: Restrict)
+  createdBy   User?              @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Settlement retry cannot debit twice
+  @@unique([acquisitionId, type])
+  @@index([auctionTeamId, createdAt])
+}
+
+enum SquadRuleType {
+  SQUAD_SIZE
+  ROLE_COUNT
+  DOMESTIC_COUNT
+  OVERSEAS_COUNT
+  CATEGORY_COUNT
+}
+
+model SquadRule {
+  id         String         @id @default(uuid()) @db.Uuid
+  auctionId  String         @db.Uuid
+  type       SquadRuleType
+  role       PlayerRoleType?
+  categoryId String?        @db.Uuid
+  minCount   Int?
+  maxCount   Int?
+
+  auction  Auction         @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  category PlayerCategory? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  progress SquadRequirementProgress[]
+
+  @@index([auctionId])
+}
+
+model SquadRequirementProgress {
+  id            String   @id @default(uuid()) @db.Uuid
+  auctionTeamId String   @db.Uuid
+  squadRuleId   String   @db.Uuid
+  currentCount  Int      @default(0)
+  satisfied     Boolean  @default(false)
+  updatedAt     DateTime @updatedAt
+
+  auctionTeam AuctionTeam @relation(fields: [auctionTeamId], references: [id], onDelete: Cascade)
+  squadRule   SquadRule   @relation(fields: [squadRuleId], references: [id], onDelete: Cascade)
+
+  @@unique([auctionTeamId, squadRuleId])
+}

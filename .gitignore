@@ -1,0 +1,23 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# dependencies and build output
+node_modules/
+.next/
+dist/
+build/
+.turbo/
+coverage/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# local data
+*.sqlite
+*.db
+*.log
+.worktrees/

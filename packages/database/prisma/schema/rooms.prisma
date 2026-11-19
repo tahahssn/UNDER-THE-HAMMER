@@ -1,0 +1,194 @@
+// Tournaments, rooms, membership, access and invitations.
+// Room visibility and spectator access are separate settings.
+
+enum RoomVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum RoomStatus {
+  DRAFT
+  REGISTRATION
+  READY
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum JoinPolicy {
+  FIRST_COME_FIRST_SERVED
+  APPROVAL
+  INVITATION
+  CODE
+}
+
+enum SpectatorPolicy {
+  PUBLIC
+  RESTRICTED
+}
+
+enum LateJoinPolicy {
+  DISALLOWED
+  ALLOWED_BEFORE_FIRST_BID
+  ALLOWED
+}
+
+enum RoomRole {
+  HOST
+  TEAM_OWNER
+  SPECTATOR
+}
+
+enum MemberStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  LEFT
+  REMOVED
+  BANNED
+}
+
+model Tournament {
+  id          String   @id @default(uuid()) @db.Uuid
+  organizerId String   @db.Uuid
+  name        String
+  description String?
+  // Tournament entry fee is separate from the host subscription (decision D-02)
+  entryFeeEnabled Boolean @default(false)
+  entryFeeMinor   BigInt?
+  entryFeeCurrency String? @db.Char(3)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizer User               @relation(fields: [organizerId], references: [id], onDelete: Restrict)
+  members   TournamentMember[]
+  rooms     AuctionRoom[]
+  payments  Payment[]
+
+  @@index([organizerId])
+}
+
+model TournamentMember {
+  tournamentId String   @db.Uuid
+  userId       String   @db.Uuid
+  role         String   @default("PARTICIPANT")
+  joinedAt     DateTime @default(now())
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([tournamentId, userId])
+}
+
+model AuctionRoom {
+  id           String         @id @default(uuid()) @db.Uuid
+  tournamentId String?        @db.Uuid
+  hostId       String         @db.Uuid
+  name         String
+  status       RoomStatus     @default(DRAFT)
+  visibility   RoomVisibility
+  // Public discovery listing. Private rooms are never listed.
+  listed       Boolean        @default(false)
+  currentSettingsVersion Int  @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  tournament   Tournament?        @relation(fields: [tournamentId], references: [id], onDelete: SetNull)
+  host         User               @relation(fields: [hostId], references: [id], onDelete: Restrict)
+  accessPolicy RoomAccessPolicy?
+  settings     RoomSettings[]
+  members      RoomMember[]
+  invitations  RoomInvitation[]
+  bans         RoomBan[]
+  auction      Auction?
+  chatMessages RoomChatMessage[]
+  chatModeration ChatModerationAction[]
+  externalLinks RoomExternalLink[]
+  connections  AuctionParticipantConnection[]
+  userReports  UserReport[]
+
+  @@index([visibility, listed, status])
+  @@index([hostId])
+  @@index([tournamentId])
+}
+
+model RoomAccessPolicy {
+  roomId           String          @id @db.Uuid
+  joinPolicy       JoinPolicy      @default(FIRST_COME_FIRST_SERVED)
+  spectatorPolicy  SpectatorPolicy @default(PUBLIC)
+  teamOwnerCapacity Int
+  spectatorCapacity Int
+  lateJoinPolicy   LateJoinPolicy  @default(DISALLOWED)
+  spectatorChatEnabled Boolean     @default(false)
+  externalLinksEnabled Boolean     @default(false)
+
+  room AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+// Versioned configuration. Each edit creates a new row. The running auction uses a snapshot.
+model RoomSettings {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @db.Uuid
+  version   Int
+  // Flexible configuration validated by shared schemas before write
+  config    Json
+  createdAt DateTime @default(now())
+
+  room AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, version])
+}
+
+model RoomMember {
+  id       String       @id @default(uuid()) @db.Uuid
+  roomId   String       @db.Uuid
+  userId   String       @db.Uuid
+  role     RoomRole
+  status   MemberStatus @default(ACTIVE)
+  joinedAt DateTime     @default(now())
+  leftAt   DateTime?
+
+  room AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([roomId, userId, role])
+  @@index([userId, status])
+  @@index([roomId, role, status])
+}
+
+model RoomInvitation {
+  id            String    @id @default(uuid()) @db.Uuid
+  roomId        String    @db.Uuid
+  createdById   String    @db.Uuid
+  inviteeUserId String?   @db.Uuid
+  role          RoomRole
+  // Hash of the secret code. The plain code is shown once at creation.
+  codeHash      String
+  expiresAt     DateTime?
+  revokedAt     DateTime?
+  maxUses       Int?
+  useCount      Int       @default(0)
+  createdAt     DateTime  @default(now())
+
+  room    AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  creator User        @relation("InvitationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  invitee User?       @relation("InvitationInvitee", fields: [inviteeUserId], references: [id], onDelete: SetNull)
+
+  @@unique([codeHash])
+  @@index([roomId])
+}
+
+model RoomBan {
+  id         String    @id @default(uuid()) @db.Uuid
+  roomId     String    @db.Uuid
+  userId     String    @db.Uuid
+  bannedById String    @db.Uuid
+  reason     String
+  createdAt  DateTime  @default(now())
+  liftedAt   DateTime?
+
+  room     AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user     User        @relation("BannedUser", fields: [userId], references: [id], onDelete: Restrict)
+  bannedBy User        @relation("BanIssuer", fields: [bannedById], references: [id], onDelete: Restrict)
+
+  @@index([roomId, userId])
+}

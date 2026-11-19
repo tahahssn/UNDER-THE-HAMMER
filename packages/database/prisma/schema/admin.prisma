@@ -1,0 +1,99 @@
+// Audit and administration. AuditLog is append-only.
+
+enum ActorType {
+  USER
+  STAFF
+  SYSTEM
+}
+
+model AuditLog {
+  id            String    @id @default(uuid()) @db.Uuid
+  actorId       String?   @db.Uuid
+  actorType     ActorType
+  action        String
+  resourceType  String
+  resourceId    String?
+  reason        String?
+  // Never store passwords, tokens or payment secrets here
+  metadata      Json?
+  correlationId String?
+  createdAt     DateTime  @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([resourceType, resourceId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+}
+
+enum AdminActionStatus {
+  COMPLETED
+  PENDING_APPROVAL
+  REJECTED
+}
+
+model AdminAction {
+  id           String            @id @default(uuid()) @db.Uuid
+  actorId      String            @db.Uuid
+  action       String
+  resourceType String
+  resourceId   String?
+  reason       String
+  status       AdminActionStatus @default(COMPLETED)
+  createdAt    DateTime          @default(now())
+
+  actor     User                  @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  approvals AdminActionApproval[]
+  appeals   Appeal[]
+
+  @@index([resourceType, resourceId])
+  @@index([status])
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
+
+model AdminActionApproval {
+  id            String           @id @default(uuid()) @db.Uuid
+  adminActionId String           @db.Uuid
+  approverId    String           @db.Uuid
+  decision      ApprovalDecision
+  note          String?
+  decidedAt     DateTime         @default(now())
+
+  adminAction AdminAction @relation(fields: [adminActionId], references: [id], onDelete: Cascade)
+  approver    User        @relation(fields: [approverId], references: [id], onDelete: Restrict)
+
+  @@unique([adminActionId, approverId])
+}
+
+model FeatureFlag {
+  key         String   @id
+  enabled     Boolean  @default(false)
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+enum ProviderHealth {
+  OPERATIONAL
+  DEGRADED
+  DOWN
+}
+
+model ProviderStatus {
+  id         String         @id @default(uuid()) @db.Uuid
+  providerKey String
+  status     ProviderHealth
+  message    String?
+  checkedAt  DateTime       @default(now())
+
+  @@index([providerKey, checkedAt])
+}

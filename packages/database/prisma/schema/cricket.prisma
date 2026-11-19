@@ -1,0 +1,234 @@
+// Players, statistics, competitions, matches and data-provider bookkeeping.
+// Internal IDs are stable. Provider identifiers are stored separately.
+
+enum PlayerRoleType {
+  BATTER
+  BOWLER
+  ALL_ROUNDER
+  WICKETKEEPER
+}
+
+enum BattingStyle {
+  RIGHT_HAND
+  LEFT_HAND
+}
+
+model Country {
+  code String @id @db.Char(2) // ISO 3166-1 alpha-2
+  name String
+
+  players Player[]
+}
+
+model PlayerCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique // e.g. MARQUEE, PLATINUM. Configurable, not an enum.
+  name      String
+  sortOrder Int      @default(0)
+
+  players        Player[]
+  auctionPrices  AuctionCategoryPrice[]
+  auctionPlayers AuctionPlayer[]
+  squadRules     SquadRule[]
+}
+
+model Player {
+  id            String         @id @default(uuid()) @db.Uuid
+  fullName      String
+  displayName   String
+  dateOfBirth   DateTime?      @db.Date
+  countryCode   String?        @db.Char(2)
+  role          PlayerRoleType
+  battingStyle  BattingStyle?
+  bowlingStyle  String?
+  categoryId    String?        @db.Uuid
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  country    Country?        @relation(fields: [countryCode], references: [code], onDelete: SetNull)
+  category   PlayerCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  aliases    PlayerAlias[]
+  sourceIds  PlayerSourceIdentifier[]
+  statistics PlayerStatistic[]
+  teamHistory PlayerTeamHistory[]
+  auctionPlayers AuctionPlayer[]
+
+  @@index([displayName])
+  @@index([countryCode])
+  @@index([role])
+}
+
+model PlayerAlias {
+  id       String @id @default(uuid()) @db.Uuid
+  playerId String @db.Uuid
+  alias    String
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, alias])
+  @@index([alias])
+}
+
+model DataProvider {
+  id        String  @id @default(uuid()) @db.Uuid
+  key       String  @unique
+  name      String
+  // Rights notes: caching, retention, attribution requirements
+  licenseNotes   String?
+  attributionText String?
+  enabled   Boolean @default(false)
+
+  playerIds PlayerSourceIdentifier[]
+  syncRuns  DataSyncRun[]
+  matches   Match[]
+  statistics PlayerStatistic[]
+  competitions Competition[]
+}
+
+model PlayerSourceIdentifier {
+  id         String @id @default(uuid()) @db.Uuid
+  playerId   String @db.Uuid
+  providerId String @db.Uuid
+  externalId String
+
+  player   Player       @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  provider DataProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+
+  @@unique([providerId, externalId])
+  @@index([playerId])
+}
+
+model PlayerStatistic {
+  id         String   @id @default(uuid()) @db.Uuid
+  playerId   String   @db.Uuid
+  // TEST, ODI, T20I, T20, FIRST_CLASS, LIST_A, CAREER ...
+  format     String
+  providerId String?  @db.Uuid
+  // Exact numbers only, unknown values stay null
+  matches    Int?
+  runs       Int?
+  battingAverage Decimal? @db.Decimal(8, 2)
+  strikeRate Decimal? @db.Decimal(8, 2)
+  wickets    Int?
+  bowlingEconomy Decimal? @db.Decimal(6, 2)
+  bowlingAverage Decimal? @db.Decimal(8, 2)
+  extra      Json?
+  asOf       DateTime
+  fetchedAt  DateTime @default(now())
+
+  player   Player        @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  provider DataProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  @@unique([playerId, format, providerId])
+  @@index([playerId])
+}
+
+model Competition {
+  id         String  @id @default(uuid()) @db.Uuid
+  name       String
+  season     String?
+  providerId String? @db.Uuid
+  externalId String?
+
+  provider DataProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  matches  Match[]
+  teamHistory PlayerTeamHistory[]
+
+  @@unique([providerId, externalId])
+}
+
+model PlayerTeamHistory {
+  id            String    @id @default(uuid()) @db.Uuid
+  playerId      String    @db.Uuid
+  teamName      String
+  competitionId String?   @db.Uuid
+  fromDate      DateTime? @db.Date
+  toDate        DateTime? @db.Date
+
+  player      Player       @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  competition Competition? @relation(fields: [competitionId], references: [id], onDelete: SetNull)
+
+  @@index([playerId])
+}
+
+enum MatchStatus {
+  UPCOMING
+  LIVE
+  COMPLETED
+  ABANDONED
+}
+
+model Match {
+  id            String      @id @default(uuid()) @db.Uuid
+  competitionId String?     @db.Uuid
+  providerId    String      @db.Uuid
+  externalId    String
+  status        MatchStatus
+  startsAt      DateTime?
+  venue         String?
+  resultText    String?
+  // Provider timestamp for freshness display
+  providerUpdatedAt DateTime?
+  fetchedAt     DateTime    @default(now())
+
+  competition Competition? @relation(fields: [competitionId], references: [id], onDelete: SetNull)
+  provider    DataProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  teams       MatchTeam[]
+  innings     MatchInnings[]
+
+  @@unique([providerId, externalId])
+  @@index([status, startsAt])
+}
+
+model MatchTeam {
+  id        String @id @default(uuid()) @db.Uuid
+  matchId   String @db.Uuid
+  name      String
+  shortName String?
+  sortOrder Int    @default(0)
+
+  match   Match          @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  innings MatchInnings[]
+
+  @@index([matchId])
+}
+
+model MatchInnings {
+  id          String  @id @default(uuid()) @db.Uuid
+  matchId     String  @db.Uuid
+  matchTeamId String  @db.Uuid
+  inningsNo   Int
+  runs        Int?
+  wickets     Int?
+  // Stored as "19.4" style string to avoid float rounding of overs
+  overs       String?
+
+  match     Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  matchTeam MatchTeam @relation(fields: [matchTeamId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, inningsNo])
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model DataSyncRun {
+  id         String     @id @default(uuid()) @db.Uuid
+  providerId String     @db.Uuid
+  // PLAYERS, MATCHES, NEWS, IMPORT
+  kind       String
+  status     SyncStatus @default(RUNNING)
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  rowsSeen   Int?
+  rowsChanged Int?
+  errorSummary String?
+
+  provider DataProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+
+  @@index([providerId, startedAt])
+}

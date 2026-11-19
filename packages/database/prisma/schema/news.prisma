@@ -1,0 +1,71 @@
+// News metadata only. No full third-party article text or protected imagery unless rights permit.
+
+enum EditorialStatus {
+  DRAFT
+  IN_REVIEW
+  PUBLISHED
+  UNPUBLISHED
+  TAKEN_DOWN
+}
+
+model NewsSource {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String
+  homepageUrl String?
+  licenseNotes String?
+  attributionText String?
+  enabled     Boolean @default(false)
+
+  articles NewsArticle[]
+}
+
+model NewsCategory {
+  id   String @id @default(uuid()) @db.Uuid
+  slug String @unique
+  name String
+
+  articles NewsArticle[]
+}
+
+model NewsTag {
+  id   String @id @default(uuid()) @db.Uuid
+  slug String @unique
+  name String
+
+  articles NewsArticleTag[]
+}
+
+model NewsArticle {
+  id           String          @id @default(uuid()) @db.Uuid
+  sourceId     String          @db.Uuid
+  categoryId   String?         @db.Uuid
+  title        String
+  // Permitted excerpt only
+  summary      String?
+  canonicalUrl String
+  imageAssetId String?         @db.Uuid
+  publishedAt  DateTime?
+  status       EditorialStatus @default(DRAFT)
+  reviewedById String?         @db.Uuid
+  takedownReason String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  source     NewsSource      @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  category   NewsCategory?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  reviewedBy User?           @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+  tags       NewsArticleTag[]
+
+  @@unique([sourceId, canonicalUrl])
+  @@index([status, publishedAt])
+}
+
+model NewsArticleTag {
+  articleId String @db.Uuid
+  tagId     String @db.Uuid
+
+  article NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tag     NewsTag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, tagId])
+}

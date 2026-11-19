@@ -1,0 +1,97 @@
+// Room-scoped chat, moderation and allowlisted external links.
+
+enum ChatMessageKind {
+  USER
+  SYSTEM
+}
+
+enum ChatMessageStatus {
+  VISIBLE
+  REMOVED
+}
+
+model RoomChatMessage {
+  id        String            @id @default(uuid()) @db.Uuid
+  roomId    String            @db.Uuid
+  authorId  String?           @db.Uuid
+  kind      ChatMessageKind   @default(USER)
+  // Stored as plain text. Rendering must escape it.
+  body      String
+  status    ChatMessageStatus @default(VISIBLE)
+  createdAt DateTime          @default(now())
+  removedAt DateTime?
+
+  room       AuctionRoom            @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  author     User?                  @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  moderation ChatModerationAction[]
+  reports    MessageReport[]
+
+  @@index([roomId, createdAt])
+}
+
+enum ChatModerationType {
+  REMOVE_MESSAGE
+  MUTE
+  UNMUTE
+  KICK
+}
+
+model ChatModerationAction {
+  id           String             @id @default(uuid()) @db.Uuid
+  roomId       String             @db.Uuid
+  actorId      String             @db.Uuid
+  type         ChatModerationType
+  messageId    String?            @db.Uuid
+  targetUserId String?            @db.Uuid
+  reason       String?
+  expiresAt    DateTime?
+  createdAt    DateTime           @default(now())
+
+  room    AuctionRoom      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  actor   User             @relation("ModerationActor", fields: [actorId], references: [id], onDelete: Restrict)
+  target  User?            @relation("ModerationTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  message RoomChatMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([roomId, targetUserId])
+}
+
+enum ExternalLinkProvider {
+  GOOGLE_MEET
+  DISCORD
+}
+
+model RoomExternalLink {
+  id         String               @id @default(uuid()) @db.Uuid
+  roomId     String               @db.Uuid
+  postedById String               @db.Uuid
+  provider   ExternalLinkProvider
+  url        String
+  createdAt  DateTime             @default(now())
+  disabledAt DateTime?
+
+  room     AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  postedBy User        @relation(fields: [postedById], references: [id], onDelete: Restrict)
+
+  @@index([roomId])
+}
+
+enum ReportStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+model MessageReport {
+  id         String       @id @default(uuid()) @db.Uuid
+  messageId  String       @db.Uuid
+  reporterId String       @db.Uuid
+  reason     String
+  status     ReportStatus @default(OPEN)
+  createdAt  DateTime     @default(now())
+
+  message  RoomChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  reporter User            @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, reporterId])
+  @@index([status])
+}

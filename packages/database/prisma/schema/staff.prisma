@@ -1,0 +1,48 @@
+// Global staff roles. Distinct from room roles.
+
+model StaffRole {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique // SUPER_ADMIN, ADMIN, SUPPORT, MODERATOR, FINANCE, CONTENT_EDITOR, AUDITOR
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  permissions StaffRolePermission[]
+  holders     StaffUserRole[]
+}
+
+model Permission {
+  id          String @id @default(uuid()) @db.Uuid
+  key         String @unique // e.g. users.suspend, payments.refund
+  description String?
+  // High-risk permissions can require a second approver
+  requiresApproval Boolean @default(false)
+
+  roles StaffRolePermission[]
+}
+
+model StaffRolePermission {
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  role       StaffRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model StaffUserRole {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  roleId      String    @db.Uuid
+  grantedById String?   @db.Uuid
+  grantedAt   DateTime  @default(now())
+  revokedAt   DateTime?
+
+  user      User      @relation("StaffRoleHolder", fields: [userId], references: [id], onDelete: Restrict)
+  role      StaffRole @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  grantedBy User?     @relation("StaffRoleGranter", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, revokedAt])
+  @@index([roleId])
+}

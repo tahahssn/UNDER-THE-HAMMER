@@ -1,0 +1,199 @@
+// Host subscriptions and payments. Subscription and tournament-entry payments are separate purposes.
+// All money is integer minor units with an explicit currency.
+
+enum BillingPeriod {
+  MONTH
+  YEAR
+}
+
+model SubscriptionPlan {
+  id          String        @id @default(uuid()) @db.Uuid
+  key         String        @unique
+  name        String
+  priceMinor  BigInt
+  currency    String        @db.Char(3)
+  period      BillingPeriod
+  active      Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+
+  entitlements  SubscriptionEntitlement[]
+  subscriptions Subscription[]
+}
+
+// Plan limits and capabilities, e.g. rooms.maxActive, room.maxTeams, room.maxSpectators
+model SubscriptionEntitlement {
+  id        String  @id @default(uuid()) @db.Uuid
+  planId    String  @db.Uuid
+  key       String
+  intValue  Int?
+  boolValue Boolean?
+
+  plan SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, key])
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  GRACE
+  CANCELLED
+  EXPIRED
+}
+
+model Subscription {
+  id                 String             @id @default(uuid()) @db.Uuid
+  userId             String             @db.Uuid
+  planId             String             @db.Uuid
+  status             SubscriptionStatus @default(PENDING)
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  plan     SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  payments Payment[]
+
+  @@index([userId, status])
+}
+
+enum ProviderMode {
+  SANDBOX
+  LIVE
+}
+
+// Metadata only. Provider secrets live in the secret manager, never in this table.
+model PaymentProviderConfig {
+  id          String       @id @default(uuid()) @db.Uuid
+  key         String       @unique // SAFEPAY, ...
+  displayName String
+  mode        ProviderMode @default(SANDBOX)
+  enabled     Boolean      @default(false)
+  metadata    Json?
+
+  payments Payment[]
+  webhooks ProviderWebhookEvent[]
+}
+
+enum PaymentPurpose {
+  HOST_SUBSCRIPTION
+  TOURNAMENT_ENTRY
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+model Payment {
+  id                String         @id @default(uuid()) @db.Uuid
+  userId            String         @db.Uuid
+  purpose           PaymentPurpose
+  subscriptionId    String?        @db.Uuid
+  tournamentId      String?        @db.Uuid
+  providerConfigId  String         @db.Uuid
+  providerPaymentId String?
+  amountMinor       BigInt
+  currency          String         @db.Char(3)
+  status            PaymentStatus  @default(PENDING)
+  idempotencyKey    String         @unique
+  createdAt         DateTime       @default(now())
+  paidAt            DateTime?
+
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  subscription Subscription?         @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  tournament   Tournament?           @relation(fields: [tournamentId], references: [id], onDelete: Restrict)
+  provider     PaymentProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Restrict)
+  refunds      Refund[]
+  invoice      Invoice?
+  ledger       FinancialLedgerEntry[]
+
+  @@unique([providerConfigId, providerPaymentId])
+  @@index([userId, createdAt])
+}
+
+model ProviderWebhookEvent {
+  id               String   @id @default(uuid()) @db.Uuid
+  providerConfigId String   @db.Uuid
+  providerEventId  String
+  eventType        String
+  payload          Json
+  signatureValid   Boolean
+  receivedAt       DateTime @default(now())
+  processedAt      DateTime?
+  processingError  String?
+
+  provider PaymentProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Restrict)
+
+  // Replayed webhooks are recorded once
+  @@unique([providerConfigId, providerEventId])
+}
+
+enum RefundStatus {
+  REQUESTED
+  PENDING_APPROVAL
+  APPROVED
+  SUBMITTED
+  SUCCEEDED
+  FAILED
+  REJECTED
+}
+
+model Refund {
+  id               String       @id @default(uuid()) @db.Uuid
+  paymentId        String       @db.Uuid
+  amountMinor      BigInt
+  reason           String
+  status           RefundStatus @default(REQUESTED)
+  requestedById    String       @db.Uuid
+  providerRefundId String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  payment     Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  requestedBy User    @relation(fields: [requestedById], references: [id], onDelete: Restrict)
+  ledger      FinancialLedgerEntry[]
+
+  @@index([paymentId])
+}
+
+model Invoice {
+  id        String   @id @default(uuid()) @db.Uuid
+  paymentId String   @unique @db.Uuid
+  number    String   @unique
+  issuedAt  DateTime @default(now())
+  objectKey String?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+}
+
+enum LedgerEntryType {
+  PAYMENT_RECEIVED
+  REFUND_ISSUED
+  ADJUSTMENT
+}
+
+// Append-only. Corrections are compensating entries.
+model FinancialLedgerEntry {
+  id          String          @id @default(uuid()) @db.Uuid
+  paymentId   String?         @db.Uuid
+  refundId    String?         @db.Uuid
+  type        LedgerEntryType
+  // Signed: money in positive, money out negative
+  amountMinor BigInt
+  currency    String          @db.Char(3)
+  description String?
+  createdAt   DateTime        @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  refund  Refund?  @relation(fields: [refundId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+  @@index([refundId])
+}
