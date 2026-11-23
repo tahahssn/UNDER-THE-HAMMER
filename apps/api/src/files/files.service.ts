@@ -128,15 +128,27 @@ export class FilesService {
       throw error;
     }
 
-    // For now, skip dimension validation (would use sharp library)
-    // In production: const dims = await this.extractDimensions(buffer);
+    // Extract and validate dimensions
+    let width = 0;
+    let height = 0;
+    try {
+      const dims = await FileSignatureValidator.extractImageDimensions(buffer);
+      width = dims.width;
+      height = dims.height;
+      FileSignatureValidator.validateDimensions(width, height, 100, 2000);
+    } catch (error) {
+      await this.fileAssetRepo.updateStatus(request.uploadId, 'REJECTED');
+      throw error;
+    }
 
-    // Update FileAsset with metadata
+    // Update FileAsset with metadata and mark PROCESSING
     await this.fileAssetRepo.markReady(request.uploadId, {
       status: 'PROCESSING',
       contentType: request.actualMimeType,
       sizeBytes: buffer.length,
       sha256: calculatedHash,
+      width,
+      height,
     });
 
     // In production, enqueue background job for image re-encoding
@@ -237,5 +249,44 @@ export class FilesService {
       createdAt: file.createdAt.toISOString(),
       updatedAt: file.updatedAt.toISOString(),
     };
+  }
+
+  /**
+   * Clean up expired uploads
+   * Should be called by a scheduled job (e.g., once per hour)
+   * Marks PENDING_UPLOAD records older than 15 minutes as REJECTED
+   */
+  async cleanupExpiredUploads(): Promise<{ cleanedUpCount: number }> {
+    // 15 minutes is the default presigned URL expiry
+    const expiredUploadIds = await this.fileAssetRepo.cleanupExpiredPendingUploads(15);
+
+    // For each expired upload, attempt to clean up S3 object (best-effort)
+    for (const uploadId of expiredUploadIds) {
+      const fileAsset = await this.fileAssetRepo.findById(uploadId);
+      if (fileAsset) {
+        await this.s3.deleteObject(fileAsset.objectKey);
+      }
+    }
+
+    return { cleanedUpCount: expiredUploadIds.length };
+  }
+
+  /**
+   * Check and recover stale PROCESSING uploads
+   * Marks very old PROCESSING records as REJECTED if S3 object doesn't exist
+   */
+  async recoverStaleProcessingUploads(): Promise<{ recoveredCount: number }> {
+    const staleUploads = await this.fileAssetRepo.findOrphanedProcessingUploads(30);
+
+    let recoveredCount = 0;
+    for (const upload of staleUploads) {
+      const s3Metadata = await this.s3.headObject(upload.objectKey);
+      if (!s3Metadata) {
+        await this.fileAssetRepo.updateStatus(upload.id, 'REJECTED');
+        recoveredCount++;
+      }
+    }
+
+    return { recoveredCount };
   }
 }

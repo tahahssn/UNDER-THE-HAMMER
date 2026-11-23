@@ -68,7 +68,7 @@ export class TeamsService {
   }
 
   /**
-   * Update team (owner only)
+   * Update team (owner or MANAGER member only)
    */
   async updateTeam(id: string, input: TeamUpdateInput, userId: string) {
     const team = await this.teamRepo.findById(id);
@@ -77,11 +77,11 @@ export class TeamsService {
       throw new NotFoundException('Team not found');
     }
 
-    // Check authorization
+    // Check authorization: creator or MANAGER role member
     if (team.createdById !== userId) {
       // Check if user is a team member with MANAGER role
-      const isMember = await this.teamRepo.isMember(id, userId);
-      if (!isMember) {
+      const isManager = await this.teamRepo.isMemberWithRole(id, userId, 'MANAGER');
+      if (!isManager) {
         throw new ForbiddenException('You do not have permission to update this team');
       }
     }

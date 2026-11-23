@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import * as sharp from 'sharp';
 
 /**
  * Validates file signatures (magic bytes) and dimensions
@@ -32,29 +33,27 @@ export class FileSignatureValidator {
   }
 
   /**
-   * Validate image dimensions from buffer
+   * Validate image dimensions from buffer using sharp library
    * Returns { width, height }
    */
-  static extractImageDimensions(buffer: Buffer): { width: number; height: number } {
-    const magicBytes = buffer.slice(0, 12);
+  static async extractImageDimensions(buffer: Buffer): Promise<{ width: number; height: number }> {
+    try {
+      const metadata = await sharp(buffer).metadata();
+      
+      if (!metadata.width || !metadata.height) {
+        throw new BadRequestException('Could not extract image dimensions');
+      }
 
-    // PNG: width and height at bytes 16-24 (big-endian)
-    const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
-    if (magicBytes.slice(0, 4).equals(pngSignature)) {
-      const width = buffer.readUInt32BE(16);
-      const height = buffer.readUInt32BE(20);
-      return { width, height };
+      return {
+        width: metadata.width,
+        height: metadata.height,
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(`Failed to extract image dimensions: ${(error as Error).message}`);
     }
-
-    // JPEG: more complex; for now, return 0x0 (defer to actual library)
-    // In production, use sharp or jimp library
-    const jpegSignature = Buffer.from([0xff, 0xd8, 0xff]);
-    if (magicBytes.slice(0, 3).equals(jpegSignature)) {
-      // Return placeholder; actual dimension extraction requires JPEG parsing
-      return { width: 0, height: 0 };
-    }
-
-    return { width: 0, height: 0 };
   }
 
   /**
@@ -67,6 +66,25 @@ export class FileSignatureValidator {
 
     if (width > maxSize || height > maxSize) {
       throw new BadRequestException(`Image dimensions must not exceed ${maxSize}x${maxSize}`);
+    }
+  }
+
+  /**
+   * Re-encode image for consistency: normalize format, strip metadata, apply quality compression
+   * Returns Buffer of optimized image
+   */
+  static async reencodeImage(buffer: Buffer): Promise<Buffer> {
+    try {
+      // Auto-rotate based on EXIF, strip metadata, convert to standardized format
+      const reencoded = await sharp(buffer)
+        .rotate() // Auto-rotate based on EXIF orientation
+        .withMetadata(false) // Strip all metadata
+        .jpeg({ quality: 85, progressive: true }) // Compress JPEG
+        .toBuffer();
+
+      return reencoded;
+    } catch (error) {
+      throw new BadRequestException(`Failed to re-encode image: ${(error as Error).message}`);
     }
   }
 }

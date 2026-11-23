@@ -116,6 +116,14 @@ export class TeamRepository {
     return !!member;
   }
 
+  async isMemberWithRole(teamId: string, userId: string, role: string) {
+    const member = await this.prisma.teamMember.findUnique({
+      where: { teamId_userId: { teamId, userId } },
+    });
+
+    return member && member.role === role;
+  }
+
   async addMember(teamId: string, userId: string, role: string = 'MEMBER') {
     return this.prisma.teamMember.create({
       data: { teamId, userId, role },

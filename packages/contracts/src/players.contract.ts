@@ -44,7 +44,7 @@ export interface PlayerDetailDto {
   category?: { id: string; key: string; name: string };
   categoryId?: string;
   aliases: string[];
-  statistics: Map<string, PlayerStatisticDto[]>;
+  statistics: Record<string, PlayerStatisticDto[]>;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

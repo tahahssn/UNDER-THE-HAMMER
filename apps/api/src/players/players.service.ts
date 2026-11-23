@@ -44,7 +44,7 @@ export class PlayersService {
 
     const stats = await this.playerRepo.getStatistics(id);
 
-    // Group statistics by format
+    // Group statistics by format, then convert Map to Record for JSON serialization
     const statisticsByFormat = new Map<string, PlayerStatisticDto[]>();
     for (const stat of stats) {
       const format = stat.format;
@@ -66,6 +66,12 @@ export class PlayersService {
       });
     }
 
+    // Convert Map to Record for JSON serialization
+    const statisticsRecord: Record<string, PlayerStatisticDto[]> = {};
+    for (const [format, formatStats] of statisticsByFormat) {
+      statisticsRecord[format] = formatStats;
+    }
+
     const aliases = player.aliases.map((a) => a.alias);
 
     return {
@@ -82,7 +88,7 @@ export class PlayersService {
         : undefined,
       categoryId: player.categoryId,
       aliases,
-      statistics: statisticsByFormat,
+      statistics: statisticsRecord,
       isActive: player.isActive,
       createdAt: player.createdAt.toISOString(),
       updatedAt: player.updatedAt.toISOString(),

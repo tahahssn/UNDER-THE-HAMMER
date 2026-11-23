@@ -1,0 +1,46 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": 1,
+      "label": "Presigned POST URL format",
+      "description": "The S3 service returns `s3://{bucket}/{key}` which is not a valid HTTP upload URL. This breaks the entire client upload flow. See `s3.client.ts:generatePresignedPostUrl`."
+    },
+    {
+      "id": 2,
+      "label": "JPEG dimension parsing incomplete",
+      "description": "`FileSignatureValidator.extractImageDimensions` returns `{ width: 0, height: 0 }` for JPEG files, so dimension validation will never work for JPEG uploads. JPEG requires library integration."
+    },
+    {
+      "id": 3,
+      "label": "Team authorization not fully enforced",
+      "description": "`TeamRepository.isMember()` checks existence but ignores the role field. Any team member can modify the team, regardless of role."
+    },
+    {
+      "id": 4,
+      "label": "No unit or integration tests",
+      "description": "No `.spec.ts` files exist in the diff. The service business logic, authorization boundaries, and S3 validation paths are untested."
+    },
+    {
+      "id": 5,
+      "label": "Player statistics provider attribution incomplete",
+      "description": "If a DataProvider record is deleted, statistics lose provider attribution. No constraint prevents deletion or defines when attribution is required."
+    },
+    {
+      "id": 6,
+      "label": "File upload progress state has no cleanup",
+      "description": "PENDING_UPLOAD records never expire. Stale uploads accumulate indefinitely. The presigned URL expires after 15 minutes but the FileAsset does not."
+    },
+    {
+      "id": 7,
+      "label": "Asset moderation has no audit trail",
+      "description": "AssetModerationCase updates `resolvedById`, `status`, and `outcome` in place. If an admin changes their decision, the original decision is lost."
+    },
+    {
+      "id": 8,
+      "label": "Shared contracts use Map type (not JSON-serializable)",
+      "description": "PlayerDetailDto uses `Map<string, PlayerStatisticDto[]>`. JSON does not serialize Map; it becomes an empty object `{}`. Should use `Record<string, PlayerStatisticDto[]>`."
+    }
+  ],
+  "reviewDoc": "d:\\UNDER-THE-HAMMER\\.agents\\tasks\\phase-e\\backend-review.md"
+}

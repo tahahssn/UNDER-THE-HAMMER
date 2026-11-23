@@ -74,4 +74,49 @@ export class FileAssetRepository {
       data: { status: 'DELETED', updatedAt: new Date() },
     });
   }
+
+  /**
+   * Clean up expired PENDING_UPLOAD records (older than 1 hour)
+   * Called by scheduled job or on-demand to prevent accumulation
+   */
+  async cleanupExpiredPendingUploads(expiryMinutes: number = 60) {
+    const expiryDate = new Date();
+    expiryDate.setMinutes(expiryDate.getMinutes() - expiryMinutes);
+
+    const expired = await this.prisma.fileAsset.findMany({
+      where: {
+        status: 'PENDING_UPLOAD',
+        createdAt: { lt: expiryDate },
+      },
+    });
+
+    // Mark expired uploads as REJECTED
+    if (expired.length > 0) {
+      await this.prisma.fileAsset.updateMany({
+        where: {
+          status: 'PENDING_UPLOAD',
+          createdAt: { lt: expiryDate },
+        },
+        data: { status: 'REJECTED', updatedAt: new Date() },
+      });
+    }
+
+    return expired.map((f) => f.id);
+  }
+
+  /**
+   * Find orphaned PROCESSING uploads (no corresponding S3 object)
+   * Used to clean up stale intermediate states
+   */
+  async findOrphanedProcessingUploads(olderThanMinutes: number = 30) {
+    const cutoffTime = new Date();
+    cutoffTime.setMinutes(cutoffTime.getMinutes() - olderThanMinutes);
+
+    return this.prisma.fileAsset.findMany({
+      where: {
+        status: 'PROCESSING',
+        updatedAt: { lt: cutoffTime },
+      },
+    });
+  }
 }

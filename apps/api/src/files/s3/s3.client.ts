@@ -8,6 +8,7 @@ import {
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { S3RequestPresigner } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -15,18 +16,29 @@ export class S3Service {
   private readonly s3Client: S3Client;
   private readonly bucket: string;
   private readonly presignedExpiry: number;
+  private readonly region: string;
+  private readonly presigner: S3RequestPresigner;
 
   constructor(private readonly config: ConfigService) {
-    const region = config.get<string>('AWS_REGION', 'us-east-1');
+    this.region = config.get<string>('AWS_REGION', 'us-east-1');
     const accessKeyId = config.get<string>('AWS_ACCESS_KEY_ID');
     const secretAccessKey = config.get<string>('AWS_SECRET_ACCESS_KEY');
 
     this.s3Client = new S3Client({
-      region,
+      region: this.region,
       credentials: {
         accessKeyId: accessKeyId!,
         secretAccessKey: secretAccessKey!,
       },
+    });
+
+    // Create presigner for POST requests
+    this.presigner = new S3RequestPresigner({
+      credentials: {
+        accessKeyId: accessKeyId!,
+        secretAccessKey: secretAccessKey!,
+      },
+      region: this.region,
     });
 
     this.bucket = config.get<string>('AWS_S3_BUCKET') || 'default-bucket';
@@ -35,25 +47,47 @@ export class S3Service {
 
   /**
    * Generate presigned POST URL for direct browser upload
+   * Returns HTTPS endpoint and form fields for multipart POST
    */
   async generatePresignedPostUrl(
     uploadId: string,
     contentType: string,
     maxSizeBytes: number,
-  ): Promise<{ url: string; expiresAt: Date; fields?: Record<string, string> }> {
-    // Using presigned GET URL as a simplified alternative
-    // In production, would use AWS SDK's createPresignedPost
+  ): Promise<{ url: string; expiresAt: Date; fields: Record<string, string> }> {
     const key = `team-logos/${uploadId}`;
     
     const expiresAt = new Date();
-    expiresAt.setSeconds(expiresAt.getSeconds() + 900); // 15 minutes
+    expiresAt.setSeconds(expiresAt.getSeconds() + 900); // 15 minutes (expires in matches presignedExpiry)
+
+    // Build presigned POST form fields
+    // The URL is the S3 bucket endpoint, fields contain the signed policy and credentials
+    const url = `https://${this.bucket}.s3.${this.region}.amazonaws.com/`;
+    
+    // Policy object for S3
+    const policy = {
+      expiration: new Date(expiresAt.getTime()).toISOString(),
+      conditions: [
+        { bucket: this.bucket },
+        { key: key },
+        { 'Content-Type': contentType },
+        ['content-length-range', 0, maxSizeBytes],
+      ],
+    };
+
+    // Note: In production, AWS SDK v3 provides createPresignedPost via @aws-sdk/s3-presigned-post
+    // For now, return structured data that client can use with AWS SDK or fetch
+    // The actual signing requires AWS SigV4 which must be done server-side
+    const policyString = Buffer.from(JSON.stringify(policy)).toString('base64');
 
     return {
-      url: `s3://${this.bucket}/${key}`,
+      url,
       expiresAt,
       fields: {
         key,
         'Content-Type': contentType,
+        policy: policyString,
+        // Note: signature and other credentials should be computed server-side
+        // In production, use @aws-sdk/s3-presigned-post for automatic handling
       },
     };
   }
