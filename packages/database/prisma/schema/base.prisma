@@ -1,0 +1,15 @@
+// Generated schema. Do not edit directly. Run `pnpm db:build` to regenerate.
+
+generator client {
+  provider = "prisma-client-js"
+  // Prevents regeneration on every install
+  output   = "../../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Uses DATABASE_URL env var for connection pooling
+  // DIRECT_URL env var used by migrations (Neon non-pooled connection)
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}

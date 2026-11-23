@@ -1,0 +1,4 @@
+# Monorepo configuration
+shamefully-hoist=true
+auto-install-peers=true
+fetch-timeout=120000

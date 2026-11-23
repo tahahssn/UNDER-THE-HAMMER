@@ -1,0 +1,1839 @@
+// ===== base.prisma =====
+// Generated schema. Do not edit directly. Run `pnpm db:build` to regenerate.
+
+generator client {
+  provider = "prisma-client-js"
+  // Prevents regeneration on every install
+  output   = "../../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Uses DATABASE_URL env var for connection pooling
+  // DIRECT_URL env var used by migrations (Neon non-pooled connection)
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+
+// ===== identity.prisma =====
+// Identity and users. Internal User.id is the primary key. Email is mutable and never a key.
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  BANNED
+  DISABLED
+  DELETED
+}
+
+enum IdentityProvider {
+  COGNITO_PASSWORD
+  COGNITO_GOOGLE
+}
+
+model User {
+  id            String     @id @default(uuid()) @db.Uuid
+  status        UserStatus @default(PENDING_VERIFICATION)
+  email         String?
+  emailVerified Boolean    @default(false)
+  username      String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  identities              UserIdentity[]
+  profile                 UserProfile?
+  notificationPreferences UserNotificationPreference[]
+
+  staffRoles        StaffUserRole[]  @relation("StaffRoleHolder")
+  staffRolesGranted StaffUserRole[]  @relation("StaffRoleGranter")
+
+  teamsCreated      Team[]
+  teamMemberships   TeamMember[]
+  filesUploaded     FileAsset[]
+  assetCasesHandled AssetModerationCase[]
+
+  articlesReviewed NewsArticle[]
+
+  tournamentsOrganized Tournament[]
+  tournamentMemberships TournamentMember[]
+  roomsHosted          AuctionRoom[]
+  roomMemberships      RoomMember[]
+  invitationsCreated   RoomInvitation[] @relation("InvitationCreator")
+  invitationsReceived  RoomInvitation[] @relation("InvitationInvitee")
+  roomBans             RoomBan[]        @relation("BannedUser")
+  roomBansIssued       RoomBan[]        @relation("BanIssuer")
+
+  hostActions       AuctionHostAction[]
+  auctionEvents     AuctionEvent[]
+  bidsPlaced        Bid[]
+  teamOwnerships    TeamOwner[]
+  purseTransactions TeamPurseTransaction[]
+  connections       AuctionParticipantConnection[]
+
+  chatMessages         RoomChatMessage[]
+  moderationActions    ChatModerationAction[] @relation("ModerationActor")
+  moderationTargets    ChatModerationAction[] @relation("ModerationTarget")
+  externalLinksPosted  RoomExternalLink[]
+  messageReports       MessageReport[]
+
+  subscriptions Subscription[]
+  payments      Payment[]
+  refundsRequested Refund[]
+
+  notifications        Notification[]
+  supportCasesRequested SupportCase[]        @relation("SupportRequester")
+  supportCasesAssigned  SupportCase[]        @relation("SupportAssignee")
+  supportMessages       SupportCaseMessage[]
+  reportsFiled          UserReport[]         @relation("ReportFiler")
+  reportsAgainst        UserReport[]         @relation("ReportTarget")
+  appeals               Appeal[]
+  announcements         Announcement[]
+  maintenanceNotices    MaintenanceNotice[]
+
+  auditLogs          AuditLog[]
+  adminActions       AdminAction[]
+  adminApprovals     AdminActionApproval[]
+
+  @@unique([email])
+  @@unique([username])
+  @@index([status])
+}
+
+model UserIdentity {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  provider  IdentityProvider
+  // Stable Cognito subject (`sub`). Unique per provider.
+  subject   String
+  createdAt DateTime         @default(now())
+  lastLoginAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, subject])
+  @@index([userId])
+}
+
+model UserProfile {
+  userId      String   @id @db.Uuid
+  displayName String
+  avatarAssetId String? @db.Uuid
+  locale      String?
+  timezone    String?
+  countryCode String?  @db.Char(2)
+  updatedAt   DateTime @updatedAt
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  avatarAsset FileAsset? @relation(fields: [avatarAssetId], references: [id], onDelete: SetNull)
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+model UserNotificationPreference {
+  id       String              @id @default(uuid()) @db.Uuid
+  userId   String              @db.Uuid
+  // e.g. AUCTION_INVITE, AUCTION_REMINDER, BILLING, SUPPORT, MARKETING
+  category String
+  channel  NotificationChannel
+  enabled  Boolean             @default(true)
+  // Consent timestamp, required before enabling MARKETING
+  consentedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, channel])
+}
+
+
+// ===== staff.prisma =====
+// Global staff roles. Distinct from room roles.
+
+model StaffRole {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique // SUPER_ADMIN, ADMIN, SUPPORT, MODERATOR, FINANCE, CONTENT_EDITOR, AUDITOR
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  permissions StaffRolePermission[]
+  holders     StaffUserRole[]
+}
+
+model Permission {
+  id          String @id @default(uuid()) @db.Uuid
+  key         String @unique // e.g. users.suspend, payments.refund
+  description String?
+  // High-risk permissions can require a second approver
+  requiresApproval Boolean @default(false)
+
+  roles StaffRolePermission[]
+}
+
+model StaffRolePermission {
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  role       StaffRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model StaffUserRole {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  roleId      String    @db.Uuid
+  grantedById String?   @db.Uuid
+  grantedAt   DateTime  @default(now())
+  revokedAt   DateTime?
+
+  user      User      @relation("StaffRoleHolder", fields: [userId], references: [id], onDelete: Restrict)
+  role      StaffRole @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  grantedBy User?     @relation("StaffRoleGranter", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, revokedAt])
+  @@index([roleId])
+}
+
+
+// ===== teams.prisma =====
+// Reusable team identity and uploaded files. Auction-specific state lives in AuctionTeam.
+
+enum FileAssetStatus {
+  PENDING_UPLOAD
+  PROCESSING
+  READY
+  REJECTED
+  DISABLED
+  DELETED
+}
+
+enum FileAssetKind {
+  TEAM_LOGO
+  USER_AVATAR
+  EXPORT_IMAGE
+}
+
+model FileAsset {
+  id          String          @id @default(uuid()) @db.Uuid
+  kind        FileAssetKind
+  status      FileAssetStatus @default(PENDING_UPLOAD)
+  // S3 object key only. Never an arbitrary remote URL.
+  objectKey   String
+  bucket      String
+  contentType String?
+  sizeBytes   BigInt?
+  width       Int?
+  height      Int?
+  sha256      String?
+  uploadedById String?        @db.Uuid
+  // Uploader confirmed they have rights to use the asset
+  rightsConfirmedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  uploadedBy  User?                 @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  teamAssets  TeamAsset[]
+  currentLogoFor Team[] @relation("CurrentLogo")
+  profiles    UserProfile[]
+  cases       AssetModerationCase[]
+
+  @@unique([bucket, objectKey])
+  @@index([uploadedById])
+  @@index([status])
+}
+
+enum TeamStatus {
+  ACTIVE
+  ARCHIVED
+  DISABLED
+}
+
+model Team {
+  id             String     @id @default(uuid()) @db.Uuid
+  createdById    String     @db.Uuid
+  name           String
+  shortName      String
+  description    String?
+  primaryColor   String     @db.VarChar(9)
+  secondaryColor String?    @db.VarChar(9)
+  countryCode    String?    @db.Char(2)
+  status         TeamStatus @default(ACTIVE)
+  currentLogoAssetId String? @db.Uuid
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  createdBy User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  currentLogo FileAsset? @relation("CurrentLogo", fields: [currentLogoAssetId], references: [id], onDelete: SetNull)
+  members   TeamMember[]
+  assets    TeamAsset[]
+  auctionTeams AuctionTeam[]
+
+  @@index([createdById])
+  @@index([status])
+}
+
+model TeamMember {
+  teamId String @db.Uuid
+  userId String @db.Uuid
+  role   String @default("MANAGER")
+  addedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+}
+
+// History of logos per team, so replacing a logo never damages past auctions.
+model TeamAsset {
+  id        String   @id @default(uuid()) @db.Uuid
+  teamId    String   @db.Uuid
+  assetId   String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  team  Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  asset FileAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([teamId, assetId])
+}
+
+enum AssetCaseStatus {
+  OPEN
+  ACTION_TAKEN
+  DISMISSED
+}
+
+model AssetModerationCase {
+  id           String          @id @default(uuid()) @db.Uuid
+  assetId      String          @db.Uuid
+  // COPYRIGHT, TRADEMARK, POLICY, OTHER
+  reason       String
+  complaintText String?
+  complainantEmail String?
+  status       AssetCaseStatus @default(OPEN)
+  outcome      String?
+  resolvedById String?         @db.Uuid
+  createdAt    DateTime        @default(now())
+  resolvedAt   DateTime?
+
+  asset      FileAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  resolvedBy User?     @relation(fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([assetId])
+  @@index([status])
+}
+
+
+// ===== cricket.prisma =====
+// Players, statistics, competitions, matches and data-provider bookkeeping.
+// Internal IDs are stable. Provider identifiers are stored separately.
+
+enum PlayerRoleType {
+  BATTER
+  BOWLER
+  ALL_ROUNDER
+  WICKETKEEPER
+}
+
+enum BattingStyle {
+  RIGHT_HAND
+  LEFT_HAND
+}
+
+model Country {
+  code String @id @db.Char(2) // ISO 3166-1 alpha-2
+  name String
+
+  players Player[]
+}
+
+model PlayerCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique // e.g. MARQUEE, PLATINUM. Configurable, not an enum.
+  name      String
+  sortOrder Int      @default(0)
+
+  players        Player[]
+  auctionPrices  AuctionCategoryPrice[]
+  auctionPlayers AuctionPlayer[]
+  squadRules     SquadRule[]
+}
+
+model Player {
+  id            String         @id @default(uuid()) @db.Uuid
+  fullName      String
+  displayName   String
+  dateOfBirth   DateTime?      @db.Date
+  countryCode   String?        @db.Char(2)
+  role          PlayerRoleType
+  battingStyle  BattingStyle?
+  bowlingStyle  String?
+  categoryId    String?        @db.Uuid
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  country    Country?        @relation(fields: [countryCode], references: [code], onDelete: SetNull)
+  category   PlayerCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  aliases    PlayerAlias[]
+  sourceIds  PlayerSourceIdentifier[]
+  statistics PlayerStatistic[]
+  teamHistory PlayerTeamHistory[]
+  auctionPlayers AuctionPlayer[]
+
+  @@index([displayName])
+  @@index([countryCode])
+  @@index([role])
+}
+
+model PlayerAlias {
+  id       String @id @default(uuid()) @db.Uuid
+  playerId String @db.Uuid
+  alias    String
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, alias])
+  @@index([alias])
+}
+
+model DataProvider {
+  id        String  @id @default(uuid()) @db.Uuid
+  key       String  @unique
+  name      String
+  // Rights notes: caching, retention, attribution requirements
+  licenseNotes   String?
+  attributionText String?
+  enabled   Boolean @default(false)
+
+  playerIds PlayerSourceIdentifier[]
+  syncRuns  DataSyncRun[]
+  matches   Match[]
+  statistics PlayerStatistic[]
+  competitions Competition[]
+}
+
+model PlayerSourceIdentifier {
+  id         String @id @default(uuid()) @db.Uuid
+  playerId   String @db.Uuid
+  providerId String @db.Uuid
+  externalId String
+
+  player   Player       @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  provider DataProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+
+  @@unique([providerId, externalId])
+  @@index([playerId])
+}
+
+model PlayerStatistic {
+  id         String   @id @default(uuid()) @db.Uuid
+  playerId   String   @db.Uuid
+  // TEST, ODI, T20I, T20, FIRST_CLASS, LIST_A, CAREER ...
+  format     String
+  providerId String?  @db.Uuid
+  // Exact numbers only, unknown values stay null
+  matches    Int?
+  runs       Int?
+  battingAverage Decimal? @db.Decimal(8, 2)
+  strikeRate Decimal? @db.Decimal(8, 2)
+  wickets    Int?
+  bowlingEconomy Decimal? @db.Decimal(6, 2)
+  bowlingAverage Decimal? @db.Decimal(8, 2)
+  extra      Json?
+  asOf       DateTime
+  fetchedAt  DateTime @default(now())
+
+  player   Player        @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  provider DataProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  @@unique([playerId, format, providerId])
+  @@index([playerId])
+}
+
+model Competition {
+  id         String  @id @default(uuid()) @db.Uuid
+  name       String
+  season     String?
+  providerId String? @db.Uuid
+  externalId String?
+
+  provider DataProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  matches  Match[]
+  teamHistory PlayerTeamHistory[]
+
+  @@unique([providerId, externalId])
+}
+
+model PlayerTeamHistory {
+  id            String    @id @default(uuid()) @db.Uuid
+  playerId      String    @db.Uuid
+  teamName      String
+  competitionId String?   @db.Uuid
+  fromDate      DateTime? @db.Date
+  toDate        DateTime? @db.Date
+
+  player      Player       @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  competition Competition? @relation(fields: [competitionId], references: [id], onDelete: SetNull)
+
+  @@index([playerId])
+}
+
+enum MatchStatus {
+  UPCOMING
+  LIVE
+  COMPLETED
+  ABANDONED
+}
+
+model Match {
+  id            String      @id @default(uuid()) @db.Uuid
+  competitionId String?     @db.Uuid
+  providerId    String      @db.Uuid
+  externalId    String
+  status        MatchStatus
+  startsAt      DateTime?
+  venue         String?
+  resultText    String?
+  // Provider timestamp for freshness display
+  providerUpdatedAt DateTime?
+  fetchedAt     DateTime    @default(now())
+
+  competition Competition? @relation(fields: [competitionId], references: [id], onDelete: SetNull)
+  provider    DataProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  teams       MatchTeam[]
+  innings     MatchInnings[]
+
+  @@unique([providerId, externalId])
+  @@index([status, startsAt])
+}
+
+model MatchTeam {
+  id        String @id @default(uuid()) @db.Uuid
+  matchId   String @db.Uuid
+  name      String
+  shortName String?
+  sortOrder Int    @default(0)
+
+  match   Match          @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  innings MatchInnings[]
+
+  @@index([matchId])
+}
+
+model MatchInnings {
+  id          String  @id @default(uuid()) @db.Uuid
+  matchId     String  @db.Uuid
+  matchTeamId String  @db.Uuid
+  inningsNo   Int
+  runs        Int?
+  wickets     Int?
+  // Stored as "19.4" style string to avoid float rounding of overs
+  overs       String?
+
+  match     Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  matchTeam MatchTeam @relation(fields: [matchTeamId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, inningsNo])
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model DataSyncRun {
+  id         String     @id @default(uuid()) @db.Uuid
+  providerId String     @db.Uuid
+  // PLAYERS, MATCHES, NEWS, IMPORT
+  kind       String
+  status     SyncStatus @default(RUNNING)
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  rowsSeen   Int?
+  rowsChanged Int?
+  errorSummary String?
+
+  provider DataProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+
+  @@index([providerId, startedAt])
+}
+
+
+// ===== news.prisma =====
+// News metadata only. No full third-party article text or protected imagery unless rights permit.
+
+enum EditorialStatus {
+  DRAFT
+  IN_REVIEW
+  PUBLISHED
+  UNPUBLISHED
+  TAKEN_DOWN
+}
+
+model NewsSource {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String
+  homepageUrl String?
+  licenseNotes String?
+  attributionText String?
+  enabled     Boolean @default(false)
+
+  articles NewsArticle[]
+}
+
+model NewsCategory {
+  id   String @id @default(uuid()) @db.Uuid
+  slug String @unique
+  name String
+
+  articles NewsArticle[]
+}
+
+model NewsTag {
+  id   String @id @default(uuid()) @db.Uuid
+  slug String @unique
+  name String
+
+  articles NewsArticleTag[]
+}
+
+model NewsArticle {
+  id           String          @id @default(uuid()) @db.Uuid
+  sourceId     String          @db.Uuid
+  categoryId   String?         @db.Uuid
+  title        String
+  // Permitted excerpt only
+  summary      String?
+  canonicalUrl String
+  imageAssetId String?         @db.Uuid
+  publishedAt  DateTime?
+  status       EditorialStatus @default(DRAFT)
+  reviewedById String?         @db.Uuid
+  takedownReason String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  source     NewsSource      @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  category   NewsCategory?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  reviewedBy User?           @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+  tags       NewsArticleTag[]
+
+  @@unique([sourceId, canonicalUrl])
+  @@index([status, publishedAt])
+}
+
+model NewsArticleTag {
+  articleId String @db.Uuid
+  tagId     String @db.Uuid
+
+  article NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tag     NewsTag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, tagId])
+}
+
+
+// ===== rooms.prisma =====
+// Tournaments, rooms, membership, access and invitations.
+// Room visibility and spectator access are separate settings.
+
+enum RoomVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum RoomStatus {
+  DRAFT
+  REGISTRATION
+  READY
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum JoinPolicy {
+  FIRST_COME_FIRST_SERVED
+  APPROVAL
+  INVITATION
+  CODE
+}
+
+enum SpectatorPolicy {
+  PUBLIC
+  RESTRICTED
+}
+
+enum LateJoinPolicy {
+  DISALLOWED
+  ALLOWED_BEFORE_FIRST_BID
+  ALLOWED
+}
+
+enum RoomRole {
+  HOST
+  TEAM_OWNER
+  SPECTATOR
+}
+
+enum MemberStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  LEFT
+  REMOVED
+  BANNED
+}
+
+model Tournament {
+  id          String   @id @default(uuid()) @db.Uuid
+  organizerId String   @db.Uuid
+  name        String
+  description String?
+  // Tournament entry fee is separate from the host subscription (decision D-02)
+  entryFeeEnabled Boolean @default(false)
+  entryFeeMinor   BigInt?
+  entryFeeCurrency String? @db.Char(3)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizer User               @relation(fields: [organizerId], references: [id], onDelete: Restrict)
+  members   TournamentMember[]
+  rooms     AuctionRoom[]
+  payments  Payment[]
+
+  @@index([organizerId])
+}
+
+model TournamentMember {
+  tournamentId String   @db.Uuid
+  userId       String   @db.Uuid
+  role         String   @default("PARTICIPANT")
+  joinedAt     DateTime @default(now())
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([tournamentId, userId])
+}
+
+model AuctionRoom {
+  id           String         @id @default(uuid()) @db.Uuid
+  tournamentId String?        @db.Uuid
+  hostId       String         @db.Uuid
+  name         String
+  status       RoomStatus     @default(DRAFT)
+  visibility   RoomVisibility
+  // Public discovery listing. Private rooms are never listed.
+  listed       Boolean        @default(false)
+  currentSettingsVersion Int  @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  tournament   Tournament?        @relation(fields: [tournamentId], references: [id], onDelete: SetNull)
+  host         User               @relation(fields: [hostId], references: [id], onDelete: Restrict)
+  accessPolicy RoomAccessPolicy?
+  settings     RoomSettings[]
+  members      RoomMember[]
+  invitations  RoomInvitation[]
+  bans         RoomBan[]
+  auction      Auction?
+  chatMessages RoomChatMessage[]
+  chatModeration ChatModerationAction[]
+  externalLinks RoomExternalLink[]
+  connections  AuctionParticipantConnection[]
+  userReports  UserReport[]
+
+  @@index([visibility, listed, status])
+  @@index([hostId])
+  @@index([tournamentId])
+}
+
+model RoomAccessPolicy {
+  roomId           String          @id @db.Uuid
+  joinPolicy       JoinPolicy      @default(FIRST_COME_FIRST_SERVED)
+  spectatorPolicy  SpectatorPolicy @default(PUBLIC)
+  teamOwnerCapacity Int
+  spectatorCapacity Int
+  lateJoinPolicy   LateJoinPolicy  @default(DISALLOWED)
+  spectatorChatEnabled Boolean     @default(false)
+  externalLinksEnabled Boolean     @default(false)
+
+  room AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+// Versioned configuration. Each edit creates a new row. The running auction uses a snapshot.
+model RoomSettings {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @db.Uuid
+  version   Int
+  // Flexible configuration validated by shared schemas before write
+  config    Json
+  createdAt DateTime @default(now())
+
+  room AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, version])
+}
+
+model RoomMember {
+  id       String       @id @default(uuid()) @db.Uuid
+  roomId   String       @db.Uuid
+  userId   String       @db.Uuid
+  role     RoomRole
+  status   MemberStatus @default(ACTIVE)
+  joinedAt DateTime     @default(now())
+  leftAt   DateTime?
+
+  room AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([roomId, userId, role])
+  @@index([userId, status])
+  @@index([roomId, role, status])
+}
+
+model RoomInvitation {
+  id            String    @id @default(uuid()) @db.Uuid
+  roomId        String    @db.Uuid
+  createdById   String    @db.Uuid
+  inviteeUserId String?   @db.Uuid
+  role          RoomRole
+  // Hash of the secret code. The plain code is shown once at creation.
+  codeHash      String
+  expiresAt     DateTime?
+  revokedAt     DateTime?
+  maxUses       Int?
+  useCount      Int       @default(0)
+  createdAt     DateTime  @default(now())
+
+  room    AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  creator User        @relation("InvitationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  invitee User?       @relation("InvitationInvitee", fields: [inviteeUserId], references: [id], onDelete: SetNull)
+
+  @@unique([codeHash])
+  @@index([roomId])
+}
+
+model RoomBan {
+  id         String    @id @default(uuid()) @db.Uuid
+  roomId     String    @db.Uuid
+  userId     String    @db.Uuid
+  bannedById String    @db.Uuid
+  reason     String
+  createdAt  DateTime  @default(now())
+  liftedAt   DateTime?
+
+  room     AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user     User        @relation("BannedUser", fields: [userId], references: [id], onDelete: Restrict)
+  bannedBy User        @relation("BanIssuer", fields: [bannedById], references: [id], onDelete: Restrict)
+
+  @@index([roomId, userId])
+}
+
+
+// ===== auction.prisma =====
+// Authoritative auction state. Money is stored as integer minor units (BigInt) with a currency.
+// Bids, acquisitions and events are relational and append-oriented. Never overwrite settled history.
+
+enum AuctionPhase {
+  DRAFT
+  REGISTRATION
+  READY
+  LIVE
+  PLAYER_INTRODUCTION
+  BIDDING
+  BREAK
+  SETTLEMENT
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum ControlMode {
+  HOST_CONTROLLED
+  SYSTEM_AUTOMATIC
+}
+
+enum AuctionFormat {
+  LIVE_COUNTDOWN
+  TURN_BASED
+}
+
+enum PlayerSelectionMode {
+  MANUAL
+  AUTOMATIC_DRAW
+}
+
+enum BreakCounterScope {
+  PER_PLAYER
+  PER_AUCTION
+}
+
+model Auction {
+  id            String              @id @default(uuid()) @db.Uuid
+  roomId        String              @unique @db.Uuid
+  phase         AuctionPhase        @default(DRAFT)
+  // Phase the auction returned to after PAUSED
+  resumePhase   AuctionPhase?
+  controlMode   ControlMode
+  format        AuctionFormat
+  selectionMode PlayerSelectionMode
+  hostParticipates Boolean          @default(false)
+  currency      String              @db.Char(3)
+  // Optimistic concurrency version, incremented on every committed state change
+  stateVersion  Int                 @default(0)
+  // Last assigned event sequence
+  eventSequence Int                 @default(0)
+  currentAuctionPlayerId String?    @unique @db.Uuid
+  phaseStartedAt DateTime?
+  // Server-authoritative deadline for the current timed phase
+  phaseDeadline DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  room             AuctionRoom                   @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  currentPlayer    AuctionPlayer?                @relation("CurrentPlayer", fields: [currentAuctionPlayerId], references: [id], onDelete: SetNull)
+  configSnapshot   AuctionConfigurationSnapshot?
+  categoryPrices   AuctionCategoryPrice[]
+  incrementBrackets AuctionIncrementBracket[]
+  players          AuctionPlayer[]               @relation("AuctionPlayers")
+  teams            AuctionTeam[]
+  owners           TeamOwner[]
+  squadRules       SquadRule[]
+  events           AuctionEvent[]
+  bids             Bid[]
+  acquisitions     PlayerAcquisition[]
+  hostActions      AuctionHostAction[]
+  breaks           AuctionBreak[]
+  connections      AuctionParticipantConnection[]
+
+  @@index([phase])
+}
+
+// Frozen at auction start so later edits cannot change a running auction.
+model AuctionConfigurationSnapshot {
+  auctionId  String   @id @db.Uuid
+  settingsVersion Int
+  breakEveryAcceptedBids Int?
+  breakCounterScope BreakCounterScope?
+  breakDurationSeconds  Int?
+  breakMinSeconds Int?
+  breakMaxSeconds Int?
+  countdownSeconds Int?
+  countdownExtensionSeconds Int?
+  turnSeconds Int?
+  // Turn policy fields stay null until decision D-06 is approved
+  turnPolicy Json?
+  // Remaining flexible settings, validated by shared schemas
+  extra      Json?
+  createdAt  DateTime @default(now())
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+}
+
+model AuctionCategoryPrice {
+  id            String @id @default(uuid()) @db.Uuid
+  auctionId     String @db.Uuid
+  categoryId    String @db.Uuid
+  basePriceMinor BigInt
+
+  auction  Auction        @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  category PlayerCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@unique([auctionId, categoryId])
+}
+
+// Bracket boundaries carry explicit inclusivity because the PKR 4 crore boundary is undecided (D-04).
+model AuctionIncrementBracket {
+  id             String  @id @default(uuid()) @db.Uuid
+  auctionId      String  @db.Uuid
+  sortOrder      Int
+  fromMinor      BigInt
+  fromInclusive  Boolean @default(true)
+  // Null means no upper bound
+  toMinor        BigInt?
+  toInclusive    Boolean @default(false)
+  incrementMinor BigInt
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+
+  @@unique([auctionId, sortOrder])
+}
+
+enum AuctionPlayerStatus {
+  QUEUED
+  ACTIVE
+  SOLD
+  UNSOLD
+  WITHDRAWN
+}
+
+enum SelectionSource {
+  HOST_PICK
+  SYSTEM_DRAW
+  IMPORT
+}
+
+model AuctionPlayer {
+  id             String              @id @default(uuid()) @db.Uuid
+  auctionId      String              @db.Uuid
+  playerId       String              @db.Uuid
+  categoryId     String?             @db.Uuid
+  basePriceMinor BigInt
+  // Overseas status under THIS auction's rules, not inferred from nationality alone
+  isOverseas     Boolean             @default(false)
+  status         AuctionPlayerStatus @default(QUEUED)
+  queuePosition  Int?
+  selectionSource SelectionSource?
+  currentBidMinor BigInt?
+  leadingAuctionTeamId String?       @db.Uuid
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  auction     Auction         @relation("AuctionPlayers", fields: [auctionId], references: [id], onDelete: Cascade)
+  player      Player          @relation(fields: [playerId], references: [id], onDelete: Restrict)
+  category    PlayerCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  leadingTeam AuctionTeam?    @relation("LeadingTeam", fields: [leadingAuctionTeamId], references: [id], onDelete: SetNull)
+  currentFor  Auction?        @relation("CurrentPlayer")
+  bids        Bid[]
+  acquisition PlayerAcquisition?
+  turns       AuctionTurn[]
+
+  @@unique([auctionId, playerId])
+  @@index([auctionId, status, queuePosition])
+}
+
+enum BidStatus {
+  ACCEPTED
+  REJECTED
+}
+
+model Bid {
+  id             String    @id @default(uuid()) @db.Uuid
+  auctionId      String    @db.Uuid
+  auctionPlayerId String   @db.Uuid
+  auctionTeamId  String    @db.Uuid
+  placedById     String    @db.Uuid
+  amountMinor    BigInt
+  status         BidStatus
+  // Deterministic rejection code for REJECTED bids
+  rejectionCode  String?
+  idempotencyKey String
+  // Event sequence assigned at commit. Null only for rejected bids that produce no event.
+  sequence       Int?
+  stateVersion   Int
+  createdAt      DateTime  @default(now())
+
+  auction       Auction            @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  auctionPlayer AuctionPlayer      @relation(fields: [auctionPlayerId], references: [id], onDelete: Restrict)
+  auctionTeam   AuctionTeam        @relation(fields: [auctionTeamId], references: [id], onDelete: Restrict)
+  placedBy      User               @relation(fields: [placedById], references: [id], onDelete: Restrict)
+  acquisition   PlayerAcquisition?
+
+  @@unique([auctionId, idempotencyKey])
+  @@index([auctionPlayerId, sequence])
+  @@index([auctionTeamId])
+}
+
+// One winning acquisition per auction player (unique auctionPlayerId).
+model PlayerAcquisition {
+  id              String   @id @default(uuid()) @db.Uuid
+  auctionId       String   @db.Uuid
+  auctionPlayerId String   @unique @db.Uuid
+  auctionTeamId   String   @db.Uuid
+  winningBidId    String   @unique @db.Uuid
+  priceMinor      BigInt
+  settledAt       DateTime @default(now())
+
+  auction       Auction       @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  auctionPlayer AuctionPlayer @relation(fields: [auctionPlayerId], references: [id], onDelete: Restrict)
+  auctionTeam   AuctionTeam   @relation(fields: [auctionTeamId], references: [id], onDelete: Restrict)
+  winningBid    Bid           @relation(fields: [winningBidId], references: [id], onDelete: Restrict)
+  purseTransactions TeamPurseTransaction[]
+
+  @@index([auctionTeamId])
+  @@index([auctionId])
+}
+
+// Ordered, append-only history. (auctionId, sequence) is unique.
+model AuctionEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  auctionId    String   @db.Uuid
+  sequence     Int
+  stateVersion Int
+  type         String
+  actorId      String?  @db.Uuid
+  payload      Json
+  occurredAt   DateTime @default(now())
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@unique([auctionId, sequence])
+  @@index([auctionId, type])
+}
+
+model AuctionHostAction {
+  id        String   @id @default(uuid()) @db.Uuid
+  auctionId String   @db.Uuid
+  actorId   String   @db.Uuid
+  action    String
+  reason    String?
+  params    Json?
+  createdAt DateTime @default(now())
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  actor   User    @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([auctionId, createdAt])
+}
+
+enum TurnAction {
+  RAISE
+  PASS
+  TIMEOUT
+}
+
+model AuctionTurn {
+  id              String      @id @default(uuid()) @db.Uuid
+  auctionPlayerId String      @db.Uuid
+  auctionTeamId   String      @db.Uuid
+  turnNo          Int
+  deadline        DateTime
+  action          TurnAction?
+  actedAt         DateTime?
+
+  auctionPlayer AuctionPlayer @relation(fields: [auctionPlayerId], references: [id], onDelete: Cascade)
+  auctionTeam   AuctionTeam   @relation(fields: [auctionTeamId], references: [id], onDelete: Restrict)
+
+  @@unique([auctionPlayerId, turnNo])
+}
+
+model AuctionBreak {
+  id                 String    @id @default(uuid()) @db.Uuid
+  auctionId          String    @db.Uuid
+  startedAt          DateTime
+  deadline           DateTime
+  originalDurationSeconds Int
+  reason             String
+  triggerBidCount    Int?
+  endedAt            DateTime?
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+
+  @@index([auctionId, startedAt])
+}
+
+model AuctionParticipantConnection {
+  id             String    @id @default(uuid()) @db.Uuid
+  roomId         String    @db.Uuid
+  auctionId      String?   @db.Uuid
+  userId         String    @db.Uuid
+  socketId       String
+  connectedAt    DateTime  @default(now())
+  disconnectedAt DateTime?
+
+  room    AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  auction Auction?    @relation(fields: [auctionId], references: [id], onDelete: SetNull)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, disconnectedAt])
+  @@index([userId])
+}
+
+
+// ===== squads.prisma =====
+// Auction-specific teams, owners, purse ledger and squad rules.
+// AuctionTeam is NOT the reusable Team. It owns this auction's purse and squad state.
+
+enum AllocationMethod {
+  USER_SELECTED
+  RANDOM
+  CUSTOM
+  HOST_ASSIGNED
+}
+
+model AuctionTeam {
+  id                 String           @id @default(uuid()) @db.Uuid
+  auctionId          String           @db.Uuid
+  teamId             String           @db.Uuid
+  slotIndex          Int
+  allocationMethod   AllocationMethod?
+  purseInitialMinor  BigInt
+  // Derived from the ledger. A CHECK constraint (added in migration SQL) forbids negative values.
+  purseBalanceMinor  BigInt
+  createdAt          DateTime         @default(now())
+
+  auction      Auction              @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  team         Team                 @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  owners       TeamOwner[]
+  purseLedger  TeamPurseTransaction[]
+  acquisitions PlayerAcquisition[]
+  bids         Bid[]
+  turns        AuctionTurn[]
+  leading      AuctionPlayer[]      @relation("LeadingTeam")
+  progress     SquadRequirementProgress[]
+
+  @@unique([auctionId, teamId])
+  @@unique([auctionId, slotIndex])
+}
+
+model TeamOwner {
+  id            String           @id @default(uuid()) @db.Uuid
+  auctionId     String           @db.Uuid
+  auctionTeamId String           @db.Uuid
+  userId        String           @db.Uuid
+  method        AllocationMethod
+  assignedAt    DateTime         @default(now())
+  releasedAt    DateTime?
+
+  auction     Auction     @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  auctionTeam AuctionTeam @relation(fields: [auctionTeamId], references: [id], onDelete: Restrict)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([auctionTeamId, releasedAt])
+  @@index([auctionId, userId, releasedAt])
+}
+
+enum PurseTransactionType {
+  INITIAL_CREDIT
+  ACQUISITION_DEBIT
+  ADJUSTMENT_CREDIT
+  ADJUSTMENT_DEBIT
+  REVERSAL
+}
+
+// Append-only. Corrections are new compensating rows.
+model TeamPurseTransaction {
+  id                String               @id @default(uuid()) @db.Uuid
+  auctionTeamId     String               @db.Uuid
+  type              PurseTransactionType
+  // Signed amount: credits positive, debits negative
+  amountMinor       BigInt
+  balanceAfterMinor BigInt
+  acquisitionId     String?              @db.Uuid
+  reason            String?
+  createdById       String?              @db.Uuid
+  createdAt         DateTime             @default(now())
+
+  auctionTeam AuctionTeam        @relation(fields: [auctionTeamId], references: [id], onDelete: Restrict)
+  acquisition PlayerAcquisition? @relation(fields: [acquisitionId], references: [id], onDelete: Restrict)
+  createdBy   User?              @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Settlement retry cannot debit twice
+  @@unique([acquisitionId, type])
+  @@index([auctionTeamId, createdAt])
+}
+
+enum SquadRuleType {
+  SQUAD_SIZE
+  ROLE_COUNT
+  DOMESTIC_COUNT
+  OVERSEAS_COUNT
+  CATEGORY_COUNT
+}
+
+model SquadRule {
+  id         String         @id @default(uuid()) @db.Uuid
+  auctionId  String         @db.Uuid
+  type       SquadRuleType
+  role       PlayerRoleType?
+  categoryId String?        @db.Uuid
+  minCount   Int?
+  maxCount   Int?
+
+  auction  Auction         @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  category PlayerCategory? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  progress SquadRequirementProgress[]
+
+  @@index([auctionId])
+}
+
+model SquadRequirementProgress {
+  id            String   @id @default(uuid()) @db.Uuid
+  auctionTeamId String   @db.Uuid
+  squadRuleId   String   @db.Uuid
+  currentCount  Int      @default(0)
+  satisfied     Boolean  @default(false)
+  updatedAt     DateTime @updatedAt
+
+  auctionTeam AuctionTeam @relation(fields: [auctionTeamId], references: [id], onDelete: Cascade)
+  squadRule   SquadRule   @relation(fields: [squadRuleId], references: [id], onDelete: Cascade)
+
+  @@unique([auctionTeamId, squadRuleId])
+}
+
+
+// ===== chat.prisma =====
+// Room-scoped chat, moderation and allowlisted external links.
+
+enum ChatMessageKind {
+  USER
+  SYSTEM
+}
+
+enum ChatMessageStatus {
+  VISIBLE
+  REMOVED
+}
+
+model RoomChatMessage {
+  id        String            @id @default(uuid()) @db.Uuid
+  roomId    String            @db.Uuid
+  authorId  String?           @db.Uuid
+  kind      ChatMessageKind   @default(USER)
+  // Stored as plain text. Rendering must escape it.
+  body      String
+  status    ChatMessageStatus @default(VISIBLE)
+  createdAt DateTime          @default(now())
+  removedAt DateTime?
+
+  room       AuctionRoom            @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  author     User?                  @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  moderation ChatModerationAction[]
+  reports    MessageReport[]
+
+  @@index([roomId, createdAt])
+}
+
+enum ChatModerationType {
+  REMOVE_MESSAGE
+  MUTE
+  UNMUTE
+  KICK
+}
+
+model ChatModerationAction {
+  id           String             @id @default(uuid()) @db.Uuid
+  roomId       String             @db.Uuid
+  actorId      String             @db.Uuid
+  type         ChatModerationType
+  messageId    String?            @db.Uuid
+  targetUserId String?            @db.Uuid
+  reason       String?
+  expiresAt    DateTime?
+  createdAt    DateTime           @default(now())
+
+  room    AuctionRoom      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  actor   User             @relation("ModerationActor", fields: [actorId], references: [id], onDelete: Restrict)
+  target  User?            @relation("ModerationTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  message RoomChatMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([roomId, targetUserId])
+}
+
+enum ExternalLinkProvider {
+  GOOGLE_MEET
+  DISCORD
+}
+
+model RoomExternalLink {
+  id         String               @id @default(uuid()) @db.Uuid
+  roomId     String               @db.Uuid
+  postedById String               @db.Uuid
+  provider   ExternalLinkProvider
+  url        String
+  createdAt  DateTime             @default(now())
+  disabledAt DateTime?
+
+  room     AuctionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  postedBy User        @relation(fields: [postedById], references: [id], onDelete: Restrict)
+
+  @@index([roomId])
+}
+
+enum ReportStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+model MessageReport {
+  id         String       @id @default(uuid()) @db.Uuid
+  messageId  String       @db.Uuid
+  reporterId String       @db.Uuid
+  reason     String
+  status     ReportStatus @default(OPEN)
+  createdAt  DateTime     @default(now())
+
+  message  RoomChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  reporter User            @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, reporterId])
+  @@index([status])
+}
+
+
+// ===== billing.prisma =====
+// Host subscriptions and payments. Subscription and tournament-entry payments are separate purposes.
+// All money is integer minor units with an explicit currency.
+
+enum BillingPeriod {
+  MONTH
+  YEAR
+}
+
+model SubscriptionPlan {
+  id          String        @id @default(uuid()) @db.Uuid
+  key         String        @unique
+  name        String
+  priceMinor  BigInt
+  currency    String        @db.Char(3)
+  period      BillingPeriod
+  active      Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+
+  entitlements  SubscriptionEntitlement[]
+  subscriptions Subscription[]
+}
+
+// Plan limits and capabilities, e.g. rooms.maxActive, room.maxTeams, room.maxSpectators
+model SubscriptionEntitlement {
+  id        String  @id @default(uuid()) @db.Uuid
+  planId    String  @db.Uuid
+  key       String
+  intValue  Int?
+  boolValue Boolean?
+
+  plan SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, key])
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  GRACE
+  CANCELLED
+  EXPIRED
+}
+
+model Subscription {
+  id                 String             @id @default(uuid()) @db.Uuid
+  userId             String             @db.Uuid
+  planId             String             @db.Uuid
+  status             SubscriptionStatus @default(PENDING)
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  plan     SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  payments Payment[]
+
+  @@index([userId, status])
+}
+
+enum ProviderMode {
+  SANDBOX
+  LIVE
+}
+
+// Metadata only. Provider secrets live in the secret manager, never in this table.
+model PaymentProviderConfig {
+  id          String       @id @default(uuid()) @db.Uuid
+  key         String       @unique // SAFEPAY, ...
+  displayName String
+  mode        ProviderMode @default(SANDBOX)
+  enabled     Boolean      @default(false)
+  metadata    Json?
+
+  payments Payment[]
+  webhooks ProviderWebhookEvent[]
+}
+
+enum PaymentPurpose {
+  HOST_SUBSCRIPTION
+  TOURNAMENT_ENTRY
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+model Payment {
+  id                String         @id @default(uuid()) @db.Uuid
+  userId            String         @db.Uuid
+  purpose           PaymentPurpose
+  subscriptionId    String?        @db.Uuid
+  tournamentId      String?        @db.Uuid
+  providerConfigId  String         @db.Uuid
+  providerPaymentId String?
+  amountMinor       BigInt
+  currency          String         @db.Char(3)
+  status            PaymentStatus  @default(PENDING)
+  idempotencyKey    String         @unique
+  createdAt         DateTime       @default(now())
+  paidAt            DateTime?
+
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  subscription Subscription?         @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  tournament   Tournament?           @relation(fields: [tournamentId], references: [id], onDelete: Restrict)
+  provider     PaymentProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Restrict)
+  refunds      Refund[]
+  invoice      Invoice?
+  ledger       FinancialLedgerEntry[]
+
+  @@unique([providerConfigId, providerPaymentId])
+  @@index([userId, createdAt])
+}
+
+model ProviderWebhookEvent {
+  id               String   @id @default(uuid()) @db.Uuid
+  providerConfigId String   @db.Uuid
+  providerEventId  String
+  eventType        String
+  payload          Json
+  signatureValid   Boolean
+  receivedAt       DateTime @default(now())
+  processedAt      DateTime?
+  processingError  String?
+
+  provider PaymentProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Restrict)
+
+  // Replayed webhooks are recorded once
+  @@unique([providerConfigId, providerEventId])
+}
+
+enum RefundStatus {
+  REQUESTED
+  PENDING_APPROVAL
+  APPROVED
+  SUBMITTED
+  SUCCEEDED
+  FAILED
+  REJECTED
+}
+
+model Refund {
+  id               String       @id @default(uuid()) @db.Uuid
+  paymentId        String       @db.Uuid
+  amountMinor      BigInt
+  reason           String
+  status           RefundStatus @default(REQUESTED)
+  requestedById    String       @db.Uuid
+  providerRefundId String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  payment     Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  requestedBy User    @relation(fields: [requestedById], references: [id], onDelete: Restrict)
+  ledger      FinancialLedgerEntry[]
+
+  @@index([paymentId])
+}
+
+model Invoice {
+  id        String   @id @default(uuid()) @db.Uuid
+  paymentId String   @unique @db.Uuid
+  number    String   @unique
+  issuedAt  DateTime @default(now())
+  objectKey String?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+}
+
+enum LedgerEntryType {
+  PAYMENT_RECEIVED
+  REFUND_ISSUED
+  ADJUSTMENT
+}
+
+// Append-only. Corrections are compensating entries.
+model FinancialLedgerEntry {
+  id          String          @id @default(uuid()) @db.Uuid
+  paymentId   String?         @db.Uuid
+  refundId    String?         @db.Uuid
+  type        LedgerEntryType
+  // Signed: money in positive, money out negative
+  amountMinor BigInt
+  currency    String          @db.Char(3)
+  description String?
+  createdAt   DateTime        @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  refund  Refund?  @relation(fields: [refundId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+  @@index([refundId])
+}
+
+
+// ===== support.prisma =====
+// Notifications, support, reports, appeals and announcements.
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  category  String
+  title     String
+  body      String?
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@index([userId, readAt, createdAt])
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model NotificationDelivery {
+  id             String              @id @default(uuid()) @db.Uuid
+  notificationId String              @db.Uuid
+  channel        NotificationChannel
+  status         DeliveryStatus      @default(PENDING)
+  attempts       Int                 @default(0)
+  sentAt         DateTime?
+  error          String?
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel])
+}
+
+enum SupportCaseStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_USER
+  RESOLVED
+  CLOSED
+}
+
+enum CasePriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model SupportCase {
+  id               String            @id @default(uuid()) @db.Uuid
+  requesterId      String            @db.Uuid
+  assigneeId       String?           @db.Uuid
+  category         String
+  priority         CasePriority      @default(NORMAL)
+  status           SupportCaseStatus @default(OPEN)
+  subject          String
+  resolutionReason String?
+  createdAt        DateTime          @default(now())
+  resolvedAt       DateTime?
+
+  requester User                 @relation("SupportRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  assignee  User?                @relation("SupportAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  messages  SupportCaseMessage[]
+
+  @@index([status, priority])
+  @@index([assigneeId, status])
+}
+
+model SupportCaseMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  caseId    String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  // Internal notes are hidden from the requester
+  internal  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  supportCase SupportCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  author      User        @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, createdAt])
+}
+
+model UserReport {
+  id           String       @id @default(uuid()) @db.Uuid
+  reporterId   String       @db.Uuid
+  targetUserId String       @db.Uuid
+  roomId       String?      @db.Uuid
+  reason       String
+  details      String?
+  status       ReportStatus @default(OPEN)
+  createdAt    DateTime     @default(now())
+
+  reporter User         @relation("ReportFiler", fields: [reporterId], references: [id], onDelete: Restrict)
+  target   User         @relation("ReportTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  room     AuctionRoom? @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([targetUserId])
+}
+
+enum AppealStatus {
+  OPEN
+  UPHELD
+  OVERTURNED
+}
+
+model Appeal {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @db.Uuid
+  adminActionId  String?      @db.Uuid
+  reason         String
+  status         AppealStatus @default(OPEN)
+  decisionNote   String?
+  createdAt      DateTime     @default(now())
+  decidedAt      DateTime?
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  adminAction AdminAction? @relation(fields: [adminActionId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+enum AnnouncementKind {
+  ANNOUNCEMENT
+  RELEASE_NOTE
+}
+
+model Announcement {
+  id          String           @id @default(uuid()) @db.Uuid
+  kind        AnnouncementKind
+  title       String
+  body        String
+  // Audience description recorded for audit. Null means all users.
+  audience    Json?
+  publishedAt DateTime?
+  createdById String           @db.Uuid
+  createdAt   DateTime         @default(now())
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+}
+
+model MaintenanceNotice {
+  id          String   @id @default(uuid()) @db.Uuid
+  message     String
+  startsAt    DateTime
+  endsAt      DateTime?
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+}
+
+
+// ===== admin.prisma =====
+// Audit and administration. AuditLog is append-only.
+
+enum ActorType {
+  USER
+  STAFF
+  SYSTEM
+}
+
+model AuditLog {
+  id            String    @id @default(uuid()) @db.Uuid
+  actorId       String?   @db.Uuid
+  actorType     ActorType
+  action        String
+  resourceType  String
+  resourceId    String?
+  reason        String?
+  // Never store passwords, tokens or payment secrets here
+  metadata      Json?
+  correlationId String?
+  createdAt     DateTime  @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([resourceType, resourceId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+}
+
+enum AdminActionStatus {
+  COMPLETED
+  PENDING_APPROVAL
+  REJECTED
+}
+
+model AdminAction {
+  id           String            @id @default(uuid()) @db.Uuid
+  actorId      String            @db.Uuid
+  action       String
+  resourceType String
+  resourceId   String?
+  reason       String
+  status       AdminActionStatus @default(COMPLETED)
+  createdAt    DateTime          @default(now())
+
+  actor     User                  @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  approvals AdminActionApproval[]
+  appeals   Appeal[]
+
+  @@index([resourceType, resourceId])
+  @@index([status])
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
+
+model AdminActionApproval {
+  id            String           @id @default(uuid()) @db.Uuid
+  adminActionId String           @db.Uuid
+  approverId    String           @db.Uuid
+  decision      ApprovalDecision
+  note          String?
+  decidedAt     DateTime         @default(now())
+
+  adminAction AdminAction @relation(fields: [adminActionId], references: [id], onDelete: Cascade)
+  approver    User        @relation(fields: [approverId], references: [id], onDelete: Restrict)
+
+  @@unique([adminActionId, approverId])
+}
+
+model FeatureFlag {
+  key         String   @id
+  enabled     Boolean  @default(false)
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+enum ProviderHealth {
+  OPERATIONAL
+  DEGRADED
+  DOWN
+}
+
+model ProviderStatus {
+  id         String         @id @default(uuid()) @db.Uuid
+  providerKey String
+  status     ProviderHealth
+  message    String?
+  checkedAt  DateTime       @default(now())
+
+  @@index([providerKey, checkedAt])
+}
+
+

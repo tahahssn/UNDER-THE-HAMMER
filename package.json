@@ -2,16 +2,20 @@
   "name": "under-the-hammer",
   "private": true,
   "description": "Cricket information and multiplayer auction platform",
+  "packageManager": "pnpm@12.14.0",
   "scripts": {
     "build": "turbo run build",
-    "lint": "turbo run lint",
+    "build:schema": "node packages/database/prisma/build-schema.mjs",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "db:validate": "pnpm --filter @uth/database validate",
-    "db:migrate": "pnpm --filter @uth/database migrate:dev",
-    "db:seed": "pnpm --filter @uth/database seed"
+    "db:validate": "npm run build:schema",
+    "db:migrate": "npm run build:schema && npm --prefix packages/database run migrate:dev",
+    "db:seed": "npm --prefix packages/database run seed"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
   }
 }
