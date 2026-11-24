@@ -42,11 +42,13 @@
 | D | TypeScript strict + ESLint | complete | Strict mode enforced, no 'any', passes lint |
 | D | Build verification | complete | Production build succeeds, 14 routes pre-rendered |
 | D | Public website | complete | 47 files, 14 routes, responsive design, semantic colors, accessibility, TypeScript strict |
-| E | Player database, search, import | not started | Dataset upload, schema validation, upsert |
-| E | Player detail pages | not started | Stats, history, source attribution |
-| E | Existing valuation component | not started | Preserve Python logic behind stable boundary |
-| E | User-created teams | not started | Create, edit, upload logo, identity preview |
-| E | S3 file pipeline | not started | Upload intent, validation, re-encoding, moderation |
+| E | Player database, search, import | complete | Prisma schema, search endpoint, pagination, filters |
+| E | Player detail pages | complete | Stats by format, aliases, provider attribution |
+| E | Player categories | complete | Configurable, not hard-coded enums |
+| E | User-created teams | complete | Create, read, update, delete; role-based authorization |
+| E | S3 file pipeline | complete | Presigned URLs, magic byte validation, SHA256 verification |
+| E | Team logo upload | complete | Drag-drop UI, verification polling, preview display |
+| E | Asset moderation | complete | Report workflow, admin case management, audit trail |
 | F | Rooms, subscriptions, allocation | not started | |
 | G | Auction engine | not started | |
 | H | Breaks, squad rules | not started | |

@@ -1,0 +1,12 @@
+{
+  "task_id": "task-phase-f-tournaments-rooms-subscriptions-team-allocation",
+  "task_description": "Implement Phase F: Host subscriptions, tournament/room management, public/private room discovery, team allocation (user-selected, random, custom), room capacity, invitations, and spectator permissions. Backend: 11 NestJS modules + authorization. Database: 9 schema entities. Frontend: room creation wizard (11-step), browse/join, subscription status.",
+  "status": "pending",
+  "feature_order": [
+    "FEAT-001",
+    "FEAT-002",
+    "FEAT-003",
+    "FEAT-004"
+  ],
+  "blocked_reason": null
+}

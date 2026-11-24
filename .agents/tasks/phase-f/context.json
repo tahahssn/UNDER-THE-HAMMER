@@ -1,0 +1,21 @@
+{
+  "project_type": "Full-stack cricket auction platform: Next.js 14 (React + TypeScript) + NestJS monorepo + PostgreSQL (Neon) + Socket.IO + AWS S3",
+  "language": "TypeScript (strict mode)",
+  "build_system": "pnpm workspaces + Turborepo + esbuild for backend, Next.js for frontend",
+  "test_framework": "Vitest for unit/integration tests, Playwright for E2E (to be configured)",
+  "build_command": "cd d:\\UNDER-THE-HAMMER && pnpm run build",
+  "test_command": "cd d:\\UNDER-THE-HAMMER && pnpm run test",
+  "verification_instructions": "1. Build with pnpm run build — all packages compile. 2. Run tests with pnpm run test — all tests pass. 3. Schema lint with prisma validate. 4. Type check with tsc --noEmit. 5. For database: create migrations with prisma migrate dev --name <name>, test with npm run test:db",
+  "snapshot_or_generated_files": "Prisma schema compiles to packages/database/node_modules/.prisma/client. Contracts are hand-authored TypeScript, never generated. Database migrations in packages/database/prisma/migrations/.",
+  "environment_constraints": "DATABASE_URL and DIRECT_URL env vars required for database operations (Neon non-pooled and pooled). Cognito keys and S3 credentials in separate env files. No hardcoded PSL teams or eight-team assumptions.",
+  "contribution_requirements": "From AGENTS.md: Backend authority for auction state, bids, timers, purse, permissions. Use PostgreSQL + Prisma with FKs, transactions, normalized schema. Clear module boundaries. Real-time events authenticated and room-scoped. Financial correctness: BigInt for money, purse ledger, immutable history. File safety: validate logos, use S3 with least privilege. Host subscription required. No client-authoritative values.",
+  "key_patterns": "Modules: users (identity) → teams (team identity) → players (player master data) → new: subscriptions (host entitlements), rooms/tournaments (auction container), team-allocation (member assignment). Contract files in packages/contracts/src. Shared types in packages/database/prisma. API endpoints validate Cognito JWT, map to internal User. Frontend Next.js routes. Service layer handles domain logic, isolated from HTTP/Socket.IO handlers. Prisma transactions for financial operations.",
+  "relevant_files": [
+    "packages/database/prisma/schema.prisma (extend with SubscriptionPlan, Subscription, RoomSettings, RoomAccessPolicy, AuctionTeam versioning, RoomMember)",
+    "packages/contracts/src (create subscriptions.contracts.ts, rooms.contracts.ts, team-allocation.contracts.ts)",
+    "apps/api/src/modules: auth, users, teams, players → new: subscriptions, rooms, invitations, team-allocation",
+    "apps/web/src/app/(dashboard): new auction entry and browse, room creation wizard, subscription status",
+    "apps/api/src/common: auth guard, request validation, error codes"
+  ],
+  "directory_structure": "apps/api/src/modules/ — NestJS modular backend, one module per domain. apps/web/src/app/ — Next.js route groups: (auth), (dashboard), auction, etc. packages/contracts/src/ — TypeScript DTO/contract files, shared by frontend and API. packages/database/prisma/ — Prisma schema and migrations."
+}
