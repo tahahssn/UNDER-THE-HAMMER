@@ -1,35 +1,12 @@
 /**
- * Rooms and team allocation contract types.
- * Used for API responses and cross-module communication.
+ * Auction room, settings, membership and team allocation contracts.
+ * Rooms are the container for hosted auctions with configurable settings and access policies.
  */
 
 export interface RoomSettingsConfigDto {
-  teamCount: number; // 2-16
-  teamPurseMinor: bigint; // Integer in minor units
-  currency: string;
-  format: 'LIVE_COUNTDOWN' | 'TURN_BASED';
-  controlMode: 'HOST_CONTROLLED' | 'SYSTEM_AUTOMATIC';
-  playerSelectionMode: 'MANUAL' | 'AUTOMATIC_DRAW';
-  hostParticipates: boolean;
-  countdownDurationSeconds: number;
-  turnDurationSeconds: number;
-  breakAfterBidCount: number;
-  breakDurationSeconds: number;
-  maxBreakAdjustments: number;
-  bidIncrementBrackets: Array<{
-    fromMinor: bigint;
-    toMinor: bigint;
-    incrementMinor: bigint;
-  }>;
-  squadSizeMin: number;
-  squadSizeMax: number;
-  squadRules: Array<{
-    type: string; // SQUAD_SIZE, ROLE_COUNT, CATEGORY_COUNT, etc
-    role?: string;
-    categoryId?: string;
-    minCount?: number;
-    maxCount?: number;
-  }>;
+  // Flexible auction configuration validated by shared schemas
+  // Examples: controlMode, format, playerSelection, hostParticipates, teamAllocationMode, etc.
+  [key: string]: unknown;
 }
 
 export interface RoomSettingsDto {
@@ -42,27 +19,23 @@ export interface RoomSettingsDto {
 
 export interface RoomAccessPolicyDto {
   roomId: string;
-  joinPolicy: 'FIRST_COME_FIRST_SERVED' | 'APPROVAL' | 'INVITATION' | 'CODE';
-  spectatorPolicy: 'PUBLIC' | 'RESTRICTED';
+  joinPolicy: "FIRST_COME_FIRST_SERVED" | "APPROVAL" | "INVITATION" | "CODE";
+  spectatorPolicy: "PUBLIC" | "RESTRICTED";
   teamOwnerCapacity: number;
   spectatorCapacity: number;
-  lateJoinPolicy: 'DISALLOWED' | 'ALLOWED_BEFORE_FIRST_BID' | 'ALLOWED';
+  lateJoinPolicy: "DISALLOWED" | "ALLOWED_BEFORE_FIRST_BID" | "ALLOWED";
   spectatorChatEnabled: boolean;
   externalLinksEnabled: boolean;
 }
 
 export interface RoomMemberDto {
   id: string;
+  roomId: string;
   userId: string;
-  role: 'HOST' | 'TEAM_OWNER' | 'SPECTATOR';
-  status: 'PENDING_APPROVAL' | 'ACTIVE' | 'LEFT' | 'REMOVED' | 'BANNED';
+  role: "HOST" | "TEAM_OWNER" | "SPECTATOR";
+  status: "PENDING_APPROVAL" | "ACTIVE" | "LEFT" | "REMOVED" | "BANNED";
   joinedAt: string;
-  leftAt: string | null;
-  user?: {
-    id: string;
-    email: string;
-    displayName: string;
-  };
+  leftAt?: string;
 }
 
 export interface AuctionTeamDto {
@@ -70,10 +43,13 @@ export interface AuctionTeamDto {
   auctionId: string;
   teamId: string;
   slotIndex: number;
-  allocationMethod: 'USER_SELECTED' | 'RANDOM' | 'CUSTOM' | null;
+  allocationMethod?: "USER_SELECTED" | "RANDOM" | "CUSTOM" | "HOST_ASSIGNED";
   purseInitialMinor: bigint;
   purseBalanceMinor: bigint;
   createdAt: string;
+}
+
+export interface AuctionTeamDetailDto extends AuctionTeamDto {
   team?: {
     id: string;
     name: string;
@@ -84,40 +60,38 @@ export interface AuctionTeamDto {
   owners?: Array<{
     id: string;
     userId: string;
-    method: 'USER_SELECTED' | 'RANDOM' | 'CUSTOM';
+    method: string;
     assignedAt: string;
-    user?: {
-      id: string;
-      email: string;
-      displayName: string;
-    };
   }>;
 }
 
 export interface TeamOwnerDto {
   id: string;
+  auctionId: string;
   auctionTeamId: string;
   userId: string;
-  method: 'USER_SELECTED' | 'RANDOM' | 'CUSTOM';
+  method: "USER_SELECTED" | "RANDOM" | "CUSTOM" | "HOST_ASSIGNED";
   assignedAt: string;
-  releasedAt: string | null;
+  releasedAt?: string;
 }
 
 export interface AllocationResultDto {
-  success: boolean;
-  auctionTeamId?: string;
-  teamId?: string;
-  slotIndex?: number;
-  error?: string;
+  auctionId: string;
+  teamAllocations: Array<{
+    auctionTeamId: string;
+    teamId: string;
+    slotIndex: number;
+    assignedOwnerIds: string[];
+  }>;
 }
 
 export interface RoomDto {
   id: string;
-  tournamentId: string | null;
+  tournamentId?: string;
   hostId: string;
   name: string;
-  status: 'DRAFT' | 'REGISTRATION' | 'READY' | 'LIVE' | 'COMPLETED' | 'CANCELLED';
-  visibility: 'PUBLIC' | 'PRIVATE';
+  status: "DRAFT" | "REGISTRATION" | "READY" | "LIVE" | "COMPLETED" | "CANCELLED";
+  visibility: "PUBLIC" | "PRIVATE";
   listed: boolean;
   currentSettingsVersion: number;
   createdAt: string;
@@ -127,42 +101,40 @@ export interface RoomDto {
 export interface RoomDetailDto extends RoomDto {
   host?: {
     id: string;
-    email: string;
-    displayName: string;
+    displayName?: string;
   };
-  settings?: RoomSettingsDto;
   accessPolicy?: RoomAccessPolicyDto;
+  currentSettings?: RoomSettingsDto;
   memberCount?: number;
-  teams?: AuctionTeamDto[];
-  members?: RoomMemberDto[];
 }
 
 export interface RoomInvitationDto {
   id: string;
   roomId: string;
   createdById: string;
-  inviteeUserId: string | null;
-  role: 'HOST' | 'TEAM_OWNER' | 'SPECTATOR';
-  expiresAt: string | null;
-  revokedAt: string | null;
-  maxUses: number | null;
+  inviteeUserId?: string;
+  role: "HOST" | "TEAM_OWNER" | "SPECTATOR";
+  expiresAt?: string;
+  revokedAt?: string;
+  maxUses?: number;
   useCount: number;
   createdAt: string;
 }
 
 export interface RoomInvitationWithCodeDto extends RoomInvitationDto {
-  code: string; // Plain code, shown once
+  code?: string; // Shown only at creation
 }
 
 export interface RoomListResponse {
-  rooms: RoomDto[];
+  rooms: RoomDetailDto[];
   total: number;
   hasMore: boolean;
 }
 
 export interface JoinRoomRequestDto {
+  roomId: string;
   code?: string;
-  role: 'TEAM_OWNER' | 'SPECTATOR';
+  role?: "TEAM_OWNER" | "SPECTATOR";
 }
 
 export interface RoomMemberListResponse {

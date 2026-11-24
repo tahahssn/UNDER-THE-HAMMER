@@ -1,52 +1,58 @@
 /**
- * Subscription contract types.
- * Used for API responses and cross-module communication.
+ * Subscription and billing contracts.
+ * Host subscriptions are required to create and host auction rooms.
+ * Subscription entitlements define per-host limits and capabilities.
  */
 
-/** Subscription plan detail */
 export interface SubscriptionPlanDto {
   id: string;
   key: string;
   name: string;
-  priceMinor: bigint; // Integer in minor units (e.g., paisa for PKR)
+  priceMinor: bigint;
   currency: string;
-  period: 'MONTHLY' | 'ANNUAL' | 'LIFETIME';
+  period: "MONTH" | "YEAR";
   active: boolean;
   createdAt: string;
 }
 
-/** Entitlement check response */
-export interface EntitlementCheckDto {
-  hostCanCreate: boolean;
-  maxActiveRooms: number;
-  maxTeamsPerRoom: number;
-  maxSpectatorsPerRoom: number;
-  maxRoomDurationMinutes: number;
+export interface SubscriptionEntitlementDto {
+  id: string;
+  planId: string;
+  key: string;
+  intValue?: number;
+  boolValue?: boolean;
 }
 
-/** Subscription detail for user */
+export interface SubscriptionPlanDetailDto extends SubscriptionPlanDto {
+  entitlements: SubscriptionEntitlementDto[];
+}
+
 export interface SubscriptionDto {
   id: string;
   userId: string;
   planId: string;
-  plan: SubscriptionPlanDto;
-  status: 'PENDING' | 'ACTIVE' | 'GRACE' | 'CANCELLED' | 'EXPIRED';
-  currentPeriodStart: string | null;
-  currentPeriodEnd: string | null;
+  status: "PENDING" | "ACTIVE" | "GRACE" | "CANCELLED" | "EXPIRED";
+  currentPeriodStart?: string;
+  currentPeriodEnd?: string;
   cancelAtPeriodEnd: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-/** List of available subscription plans (public) */
-export interface SubscriptionPlanListResponse {
-  plans: SubscriptionPlanDto[];
-  total: number;
+export interface SubscriptionDetailDto extends SubscriptionDto {
+  plan: SubscriptionPlanDto;
 }
 
-/** List of user's subscriptions */
+export interface EntitlementCheckDto {
+  subscriptionId: string;
+  userId: string;
+  planId: string;
+  status: string;
+  entitlements: Record<string, number | boolean | null>;
+}
+
 export interface SubscriptionListResponse {
-  subscriptions: SubscriptionDto[];
+  subscriptions: SubscriptionDetailDto[];
   total: number;
   hasMore: boolean;
 }
