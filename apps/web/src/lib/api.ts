@@ -443,4 +443,168 @@ export const getDownloadUrl = async (fileId: string): Promise<ApiResponse<Downlo
   }
 };
 
+// Subscription endpoints - Phase F
+export const getSubscription = async (): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get('/v1/subscription');
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to fetch subscription',
+    };
+  }
+};
+
+export const getSubscriptionPlans = async (): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get('/v1/subscription/plans');
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to fetch subscription plans',
+    };
+  }
+};
+
+export const checkSubscriptionEntitlements = async (): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get('/v1/subscription/entitlements');
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to check subscription entitlements',
+    };
+  }
+};
+
+// Rooms endpoints - Phase F
+export const listPublicRooms = async (params?: {
+  hostName?: string;
+  teamCount?: number;
+  status?: string;
+  search?: string;
+  sortBy?: 'createdDate' | 'teams' | 'upcomingStart';
+  skip?: number;
+  take?: number;
+}): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get('/v1/rooms', {
+      params: {
+        skip: params?.skip ?? 0,
+        take: params?.take ?? 20,
+        ...params,
+      },
+    });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to fetch public rooms',
+    };
+  }
+};
+
+export const getRoomDetail = async (roomId: string): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get(`/v1/rooms/${roomId}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to fetch room detail',
+    };
+  }
+};
+
+export const createRoom = async (config: any): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.post('/v1/rooms', config);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to create room',
+    };
+  }
+};
+
+export const joinRoom = async (roomId: string, role: 'TEAM_OWNER' | 'SPECTATOR' = 'TEAM_OWNER'): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.post(`/v1/rooms/${roomId}/join`, { role });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to join room',
+    };
+  }
+};
+
+export const allocateTeam = async (roomId: string, teamId: string): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.post(`/v1/rooms/${roomId}/allocate-team`, { teamId });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to allocate team',
+    };
+  }
+};
+
+export const generateInvitation = async (roomId: string, params?: {
+  expiresAt?: string;
+  maxUses?: number;
+  role?: 'TEAM_OWNER' | 'SPECTATOR';
+}): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.post(`/v1/rooms/${roomId}/invitation`, params);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to generate invitation',
+    };
+  }
+};
+
+export const joinWithCode = async (code: string, role: 'TEAM_OWNER' | 'SPECTATOR' = 'TEAM_OWNER'): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.post('/v1/rooms/join-with-code', { code, role });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to join with code',
+    };
+  }
+};
+
+export const getMyRooms = async (): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get('/v1/rooms/my/list');
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to fetch your rooms',
+    };
+  }
+};
+
+export const startAuction = async (roomId: string): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.post(`/v1/rooms/${roomId}/start`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to start auction',
+    };
+  }
+};
+
 export default api;

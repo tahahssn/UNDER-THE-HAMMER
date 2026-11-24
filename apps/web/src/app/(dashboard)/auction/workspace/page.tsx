@@ -75,7 +75,7 @@ export default function AuctionWorkspace() {
                 title="Join Public"
                 description="Browse and join public auctions"
                 cta="Browse Auctions"
-                href="/auction/browse"
+                href="/auction/join-public"
               />
               <ActionCard
                 icon={Lock}
@@ -86,10 +86,10 @@ export default function AuctionWorkspace() {
               />
               <ActionCard
                 icon={Eye}
-                title="Spectate"
-                description="Watch auctions in real-time"
-                cta="Browse Public"
-                href="/auction/spectate"
+                title="View Subscription"
+                description="Manage your hosting subscription"
+                cta="View"
+                href="/subscription"
               />
             </div>
           </div>
