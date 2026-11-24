@@ -28,7 +28,10 @@ export class AuctionRoomGateway implements OnGatewayConnection, OnGatewayDisconn
     private readonly snapshotService: AuctionSnapshotService,
     private readonly broadcaster: AuctionEventBroadcasterService,
     private readonly repo: AuctionsRepository
-  ) {}
+  ) {
+    // Allow broadcaster to call gateway methods
+    this.broadcaster.setGateway(this);
+  }
 
   /**
    * Handle socket connection with JWT authentication
@@ -137,9 +140,9 @@ export class AuctionRoomGateway implements OnGatewayConnection, OnGatewayDisconn
         data.stateVersion
       );
 
+      // Only broadcast after the service (including transaction) completes successfully
       if (result.accepted) {
-        // Broadcast to room
-        this.server.to(`auction:${data.auctionId}`).emit('bid:accepted', {
+        this.broadcaster.broadcastBidAccepted(data.auctionId, {
           bidId: result.id,
           teamId: data.auctionTeamId,
           amountMinor: data.amountMinor,
@@ -147,6 +150,11 @@ export class AuctionRoomGateway implements OnGatewayConnection, OnGatewayDisconn
           stateVersion: result.stateVersion,
         });
       } else {
+        this.broadcaster.broadcastBidRejected(data.auctionId, {
+          bidId: result.id,
+          reason: result.reason,
+        });
+        
         client.emit('bid:rejected', {
           bidId: result.id,
           reason: result.reason,

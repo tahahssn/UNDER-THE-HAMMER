@@ -20,7 +20,8 @@ export class BidValidationService {
     teamId: string,
     amountMinor: bigint,
     stateVersion: number,
-    idempotencyKey: string
+    idempotencyKey: string,
+    userId?: string
   ): Promise<{ valid: true } | { valid: false; reason: string }> {
     // Check auction exists
     const auction = await this.repo.getAuctionById(auctionId);
@@ -54,6 +55,14 @@ export class BidValidationService {
       return { valid: false, reason: BID_ERRORS.INVALID_TEAM };
     }
 
+    // Check user is a team owner (not spectator) if userId provided
+    if (userId) {
+      const member = await this.repo.getRoomMember(auction.roomId, userId);
+      if (!member || member.role !== 'TEAM_OWNER') {
+        return { valid: false, reason: BID_ERRORS.NOT_ELIGIBLE_TO_BID };
+      }
+    }
+
     // Check player not already sold
     const player = await this.repo.getAuctionPlayers(auctionId);
     const currentPlayer = player.find((p) => p.id === auction.currentAuctionPlayerId);
@@ -65,14 +74,14 @@ export class BidValidationService {
     const existing = await this.repo.getBidByIdempotencyKey(auctionId, idempotencyKey);
     if (existing) {
       // If exists but not accepted, it's a duplicate
-      if (!existing.accepted) {
+      if (existing.status !== 'ACCEPTED') {
         return { valid: false, reason: BID_ERRORS.DUPLICATE_BID };
       }
       // If accepted, it's idempotent retry - allow (will be handled in service layer)
     }
 
     // Calculate minimum bid
-    const minimumBid = await this.computeMinimumBid(auctionId, auction.highBidMinor);
+    const minimumBid = await this.computeMinimumBid(auctionId, currentPlayer?.currentBidMinor || null);
     if (amountMinor < minimumBid) {
       return { valid: false, reason: BID_ERRORS.BELOW_MINIMUM };
     }
@@ -97,27 +106,23 @@ export class BidValidationService {
     }
 
     // Fetch increment brackets from database
-    const brackets = await this.repo.getAuctionPlayers(auctionId);
+    const brackets = await this.repo.getAuctionIncrementBrackets(auctionId);
 
-    // PKR amounts for bracket lookup
-    const PKR_1_CRORE = 100_000_000n;
-    const PKR_2_2_CRORE = 220_000_000n;
-    const PKR_4_CRORE = 400_000_000n;
-
-    let increment: bigint;
-
-    if (currentBidMinor < PKR_1_CRORE) {
-      // Below 1 crore: +10 lakh
-      increment = 10_000_000n;
-    } else if (currentBidMinor < PKR_2_2_CRORE) {
-      // 1 crore to below 2.2 crore: +15 lakh
-      increment = 15_000_000n;
-    } else if (currentBidMinor < PKR_4_CRORE) {
-      // 2.2 crore to below 4 crore: +20 lakh
-      increment = 20_000_000n;
-    } else {
-      // 4 crore and above: +25 lakh
-      increment = 25_000_000n;
+    // Find bracket that contains current bid
+    let increment = 25_000_000n; // Default to 25 lakh for amounts above 4 crore
+    
+    for (const bracket of brackets) {
+      const fromAmount = bracket.fromMinor;
+      const toAmount = bracket.toMinor ? bracket.toMinor : BigInt('9999999999999');
+      
+      const isInRange = 
+        (bracket.fromInclusive !== false ? currentBidMinor >= fromAmount : currentBidMinor > fromAmount) &&
+        (!bracket.toMinor || (bracket.toInclusive !== false ? currentBidMinor <= toAmount : currentBidMinor < toAmount));
+      
+      if (isInRange) {
+        increment = bracket.incrementMinor;
+        break;
+      }
     }
 
     return currentBidMinor + increment;

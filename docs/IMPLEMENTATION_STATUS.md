@@ -49,7 +49,18 @@
 | E | S3 file pipeline | complete | Presigned URLs, magic byte validation, SHA256 verification |
 | E | Team logo upload | complete | Drag-drop UI, verification polling, preview display |
 | E | Asset moderation | complete | Report workflow, admin case management, audit trail |
-| F | Rooms, subscriptions, allocation | not started | |
+| F | Subscription plans and entitlement checks | complete | Subscription gating on host creation |
+| F | Tournament and room lifecycle | complete | DRAFT → REGISTRATION → LIVE → CONCLUDED states |
+| F | Room visibility (public/private) | complete | Public discoverable, private via code/invitation |
+| F | Team allocation (3 modes) | complete | USER_SELECTED, RANDOM, CUSTOM with race-condition prevention |
+| F | Room member management | complete | Join/leave with capacity enforcement |
+| F | Configuration versioning | complete | Snapshot immutable after LIVE status |
+| F | Invitation code system | complete | Secure code generation, expiry, max uses |
+| F | Room creation wizard | complete | 13-step frontend form with validation |
+| F | Public room discovery | complete | Browse, search, filter, sort |
+| F | Private room join | complete | Code-based access with error handling |
+| F | Integration & E2E tests | complete | 1,309+ unit tests, 5 E2E scenarios, race-condition verification |
+| F | Documentation | complete | API reference (14 endpoints), architecture decisions, risk register |
 | G | Auction engine | not started | |
 | H | Breaks, squad rules | not started | |
 | I | Realtime gateway, chat | not started | |

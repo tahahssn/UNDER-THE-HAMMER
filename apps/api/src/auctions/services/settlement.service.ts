@@ -74,7 +74,7 @@ export class SettlementService {
     // Update player status
     await this.prisma.auctionPlayer.update({
       where: { id: playerId },
-      data: { status: 'SOLD', selledFor: priceMinor },
+      data: { status: 'SOLD', currentBidMinor: priceMinor },
     });
 
     // Update team purse balance cache (denormalized for fast access)
@@ -91,7 +91,7 @@ export class SettlementService {
   async markPlayerUnsold(auctionId: string, playerId: string) {
     return this.prisma.auctionPlayer.update({
       where: { id: playerId },
-      data: { status: 'UNSOLD', selledFor: null },
+      data: { status: 'UNSOLD', currentBidMinor: null },
     });
   }
 

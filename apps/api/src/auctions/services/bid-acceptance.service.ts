@@ -28,7 +28,7 @@ export class BidAcceptanceService {
     const existingBid = await this.repo.getBidByIdempotencyKey(auctionId, idempotencyKey);
 
     if (existingBid) {
-      if (existingBid.accepted) {
+      if (existingBid.status === 'ACCEPTED') {
         // Already accepted - return idempotent result
         return {
           id: existingBid.id,
@@ -61,8 +61,8 @@ export class BidAcceptanceService {
         amountMinor,
         userId,
         idempotencyKey,
-        accepted: false,
-        rejectionReason: validation.reason,
+        status: 'REJECTED',
+        rejectionCode: validation.reason,
         sequence: 0, // Will be set by trigger or separate service
       });
 
@@ -84,10 +84,11 @@ export class BidAcceptanceService {
           auctionPlayerId,
           auctionTeamId,
           amountMinor,
-          userId,
+          placedById: userId,
           idempotencyKey,
-          accepted: true,
+          status: 'ACCEPTED',
           sequence: 0, // Incremented by trigger
+          stateVersion,
         },
       });
 
@@ -100,14 +101,12 @@ export class BidAcceptanceService {
         throw new BadRequestException('Auction not found');
       }
 
-      // Update high bid
-      await prisma.auction.update({
-        where: { id: auctionId },
+      // Update high bid on AuctionPlayer
+      const auctionPlayer = await prisma.auctionPlayer.update({
+        where: { id: auctionPlayerId },
         data: {
-          highBidId: bid.id,
-          highBidMinor: amountMinor,
-          highBidTeamId: auctionTeamId,
-          stateVersion: { increment: 1 },
+          currentBidMinor: amountMinor,
+          leadingAuctionTeamId: auctionTeamId,
         },
       });
 
@@ -133,7 +132,7 @@ export class BidAcceptanceService {
       throw new BadRequestException('Bid not found');
     }
 
-    if (!bid.accepted) {
+    if (bid.status !== 'ACCEPTED') {
       throw new BadRequestException('Bid was not accepted');
     }
 
@@ -141,8 +140,8 @@ export class BidAcceptanceService {
     return this.prisma.bid.update({
       where: { id: bidId },
       data: {
-        accepted: false,
-        rejectionReason: reason,
+        status: 'REJECTED',
+        rejectionCode: reason,
       },
     });
   }

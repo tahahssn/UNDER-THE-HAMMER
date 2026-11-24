@@ -1,0 +1,119 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": "BID_FIELD_MISMATCH",
+      "severity": "CRITICAL",
+      "category": "Schema Mismatch",
+      "title": "Bid Model Field Names Don't Match Schema",
+      "description": "Code uses .accepted (boolean) and rejectionReason, but Prisma schema defines status (BidStatus enum) and rejectionCode (string). This prevents Prisma code generation.",
+      "files": [
+        "apps/api/src/auctions/services/bid-acceptance.service.ts:31,65,70,149-151",
+        "apps/api/src/auctions/services/bid-validation.service.ts:68",
+        "packages/database/prisma/schema.prisma:1027"
+      ],
+      "consequence": "Prisma client generation fails; all tests and compilation blocked. Cannot run or test any auction logic.",
+      "correction": "Replace .accepted with .status === 'ACCEPTED'/.status === 'REJECTED'. Replace rejectionReason with rejectionCode."
+    },
+    {
+      "id": "MISSING_AUCTION_HIGH_BID_FIELDS",
+      "severity": "HIGH",
+      "category": "Schema Mismatch",
+      "title": "Code Uses Non-Existent Auction Fields",
+      "description": "Code attempts to update Auction.highBidId, Auction.highBidMinor, Auction.highBidTeamId which do not exist in the Prisma schema.",
+      "files": [
+        "apps/api/src/auctions/auctions.repository.ts:51",
+        "apps/api/src/auctions/services/bid-acceptance.service.ts:115",
+        "packages/database/prisma/schema.prisma:Auction model"
+      ],
+      "consequence": "Bid acceptance updates fail at runtime. High bid tracking broken. Auction cannot function.",
+      "correction": "Either add fields to schema, store high bid on AuctionPlayer (not Auction), or query Bid table directly when needed."
+    },
+    {
+      "id": "SETTLEMENT_SERVICE_BROKEN",
+      "severity": "HIGH",
+      "category": "Schema Mismatch",
+      "title": "Settlement Service Uses Non-Existent Field",
+      "description": "settlement.service.ts line 59 uses auctionPlayer.selledFor which doesn't exist. Schema defines currentBidMinor, not selledFor.",
+      "files": [
+        "apps/api/src/auctions/services/settlement.service.ts:59",
+        "packages/database/prisma/schema.prisma:977 (AuctionPlayer model)"
+      ],
+      "consequence": "Players cannot be marked as sold. Settlement fails. Auction cannot complete.",
+      "correction": "Use currentBidMinor instead of selledFor, or update only status to 'SOLD'."
+    },
+    {
+      "id": "TRANSACTION_NOT_ATOMIC",
+      "severity": "HIGH",
+      "category": "Correctness",
+      "title": "Repository.withTransaction Does Not Use Transaction Instance",
+      "description": "withTransaction passes PrismaService to callback instead of transaction instance. Prisma.$transaction requires the transaction object as argument.",
+      "files": [
+        "apps/api/src/auctions/auctions.repository.ts:189-191"
+      ],
+      "consequence": "Transactions execute outside transaction context. Concurrent bid operations race. Purse debit and bid acceptance not atomic. Financial correctness violated.",
+      "correction": "Change to: return this.prisma.$transaction(async (tx) => fn(tx)); The tx parameter is the transaction instance."
+    },
+    {
+      "id": "BRACKET_LOOKUP_BYPASSED",
+      "severity": "MEDIUM",
+      "category": "Functionality",
+      "title": "Bid-Validation Ignores Configurable Brackets",
+      "description": "computeMinimumBid() fetches brackets but then ignores the result and uses hard-coded PKR values. Violates host-configurable bracket requirements.",
+      "files": [
+        "apps/api/src/auctions/services/bid-validation.service.ts:93-116"
+      ],
+      "consequence": "Custom bracket configurations cannot be used. All auctions forced to use default PKR brackets. Multi-auction flexibility broken.",
+      "correction": "Build in-memory bracket lookup table from AuctionIncrementBracket rows. Apply correct bracket based on currentBidMinor and bracket boundaries (accounting for fromInclusive/toInclusive flags)."
+    },
+    {
+      "id": "MISSING_SPECTATOR_AUTHORIZATION",
+      "severity": "HIGH",
+      "category": "Security",
+      "title": "No Authorization Check for Bidder Role",
+      "description": "bid-validation.service.ts does not verify that the user is a TEAM_OWNER, not a SPECTATOR. Spectators are read-only and must not be allowed to bid.",
+      "files": [
+        "apps/api/src/auctions/services/bid-validation.service.ts"
+      ],
+      "consequence": "Spectators can place bids, violating product rules and authorization model. Security boundary broken.",
+      "correction": "Add check in validateBidPlacement: query RoomMember and verify role === RoomRole.TEAM_OWNER before allowing bid."
+    },
+    {
+      "id": "SOCKET_IO_BROADCAST_BEFORE_COMMIT",
+      "severity": "HIGH",
+      "category": "Real-Time Correctness",
+      "title": "Event Broadcast Before Durable Commit",
+      "description": "Gateway broadcasts bid:accepted immediately after submitBid returns, before database transaction durability is verified. If transaction fails downstream, event already broadcast.",
+      "files": [
+        "apps/api/src/auctions/gateways/auction-room.gateway.ts:118-134"
+      ],
+      "consequence": "Clients receive bid:accepted but database may still fail. State divergence. Reconnect recovery broken.",
+      "correction": "Move broadcast logic into AuctionsService after Prisma transaction commits, or use Prisma.$transaction callback to couple broadcast with commit."
+    },
+    {
+      "id": "PRISMA_NOT_GENERATED",
+      "severity": "CRITICAL",
+      "category": "Operational",
+      "title": "Prisma Client Not Generated",
+      "description": "Commit message states 'awaiting Prisma generation'. Test output confirms: Cannot find module '.prisma/client/default'. Code cannot run or be tested.",
+      "files": [
+        "node_modules/.prisma/client (missing)"
+      ],
+      "consequence": "No type safety. No test execution. No CI/CD validation. Cannot verify any changes work.",
+      "correction": "Run: pnpm db:generate (requires DATABASE_URL env var set to live database connection)"
+    },
+    {
+      "id": "MANDATORY_TESTS_MISSING",
+      "severity": "MEDIUM",
+      "category": "Testing",
+      "title": "Required Test Cases Not Implemented",
+      "description": "Phase G plan specifies 10+ mandatory tests: insufficient purse, invalid increment, deadline passed, duplicate key, unauthorized team, spectator rejection, concurrent race, settlement with squad rules, idempotent retry, etc. Only auction-state-machine.spec.ts exists (unit tests only).",
+      "files": [
+        "apps/api/src/auctions/__tests__/"
+      ],
+      "consequence": "Critical functionality paths not validated. Regressions not caught. Quality assurance incomplete.",
+      "correction": "Create integration test files for each service: bid-validation.service.spec.ts, bid-acceptance.service.spec.ts, purse-ledger.service.spec.ts, settlement.service.spec.ts with all mandatory test cases."
+    }
+  ],
+  "reviewDoc": "d:\\UNDER-THE-HAMMER\\.agents\\tasks\\phase-g-impl\\review.md"
+}

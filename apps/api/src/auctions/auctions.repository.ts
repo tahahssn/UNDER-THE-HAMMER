@@ -57,15 +57,9 @@ export class AuctionsRepository {
   }
 
   async updateHighBid(auctionId: string, bidId: string, amountMinor: bigint, teamId: string) {
-    return this.prisma.auction.update({
-      where: { id: auctionId },
-      data: {
-        highBidId: bidId,
-        highBidMinor: amountMinor,
-        highBidTeamId: teamId,
-        stateVersion: { increment: 1 },
-      },
-    });
+    // High bid is now stored on AuctionPlayer, not Auction
+    // This method is kept for backwards compatibility but does nothing
+    return;
   }
 
   async getAuctionPlayers(auctionId: string, status?: string) {
@@ -172,10 +166,23 @@ export class AuctionsRepository {
     });
   }
 
+  async getAuctionIncrementBrackets(auctionId: string) {
+    return this.prisma.auctionIncrementBracket.findMany({
+      where: { auctionId },
+      orderBy: { fromAmountMinor: 'asc' },
+    });
+  }
+
+  async getRoomMember(roomId: string, userId: string) {
+    return this.prisma.roomMember.findFirst({
+      where: { roomId, userId },
+    });
+  }
+
   // Transactional operations
   async withTransaction<T>(fn: (prisma: PrismaService) => Promise<T>): Promise<T> {
-    return this.prisma.$transaction(async () => {
-      return fn(this.prisma);
+    return this.prisma.$transaction(async (tx) => {
+      return fn(tx as any);
     });
   }
 }

@@ -1,70 +1,46 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 
 /**
  * Service for broadcasting auction events to room participants via WebSocket
- * Actual Socket.IO emission happens in the gateway
+ * Actual Socket.IO emission happens through injected gateway reference
  */
 @Injectable()
 export class AuctionEventBroadcasterService {
-  /**
-   * Compose bid accepted event
-   */
-  bidAccepted(auctionId: string, bidId: string, teamId: string, amountMinor: bigint, sequence: number) {
-    return {
-      type: 'BID_ACCEPTED',
-      auctionId,
-      bidId,
-      teamId,
-      amountMinor,
-      sequence,
-      timestamp: new Date(),
-    };
+  private gateway: any; // Will be injected by gateway after initialization
+
+  setGateway(gateway: any) {
+    this.gateway = gateway;
   }
 
   /**
-   * Compose bid rejected event
+   * Broadcast bid accepted event to room
    */
-  bidRejected(auctionId: string, bidId: string, reason: string, sequence: number) {
-    return {
-      type: 'BID_REJECTED',
-      auctionId,
-      bidId,
-      reason,
-      sequence,
-      timestamp: new Date(),
-    };
+  broadcastBidAccepted(auctionId: string, payload: any) {
+    if (this.gateway) {
+      this.gateway.broadcastToRoom(auctionId, 'bid:accepted', payload);
+    }
   }
 
   /**
-   * Compose player sold event
+   * Broadcast bid rejected event to room
    */
-  playerSold(auctionId: string, playerId: string, teamId: string, priceMinor: bigint, sequence: number) {
-    return {
-      type: 'PLAYER_SOLD',
-      auctionId,
-      playerId,
-      teamId,
-      priceMinor,
-      sequence,
-      timestamp: new Date(),
-    };
+  broadcastBidRejected(auctionId: string, payload: any) {
+    if (this.gateway) {
+      this.gateway.broadcastToRoom(auctionId, 'bid:rejected', payload);
+    }
   }
 
   /**
-   * Compose player unsold event
+   * Broadcast player sold event
    */
-  playerUnsold(auctionId: string, playerId: string, sequence: number) {
-    return {
-      type: 'PLAYER_UNSOLD',
-      auctionId,
-      playerId,
-      sequence,
-      timestamp: new Date(),
-    };
+  broadcastPlayerSold(auctionId: string, event: any) {
+    if (this.gateway) {
+      this.gateway.broadcastPlayerSold(auctionId, event);
+    }
   }
 
   /**
-   * Compose phase changed event
+   * Broadcast phase changed event
    */
   phaseChanged(auctionId: string, phase: string, stateVersion: number) {
     return {

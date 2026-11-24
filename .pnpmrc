@@ -2,3 +2,5 @@
 shamefully-hoist=true
 auto-install-peers=true
 fetch-timeout=120000
+ignore-scripts=false
+allow-scripts=@prisma/client,prisma,@nestjs/core,esbuild,@prisma/engines
