@@ -1,0 +1,46 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": 1,
+      "label": "Untyped API payloads",
+      "description": "API methods createTeam, updateTeam, getUploadIntent, confirmUpload accept any, blocking compile-time safety. Add explicit DTOs to match backend contracts in packages/contracts/src/."
+    },
+    {
+      "id": 2,
+      "label": "Missing error catch types",
+      "description": "catch (error: any) in FileUpload and TeamForm violates strict mode. Use catch (error: unknown) and narrow to Error type."
+    },
+    {
+      "id": 3,
+      "label": "Presigned URL expiry invisible to user",
+      "description": "Upload intent does not expose or display expiresAt time to user. If upload exceeds URL expiry (AWS default 15 min), S3 returns 403 with no frontend retry. Display expiry time or implement auto-retry on 403 response."
+    },
+    {
+      "id": 4,
+      "label": "Polling timeout no retry",
+      "description": "FileUpload polls for 30 seconds max with no retry logic. If asset moderation or processing exceeds 30s, user sees 'verification timeout' with no recovery path. Implement exponential backoff or expose timeout via API."
+    },
+    {
+      "id": 5,
+      "label": "Logo preview after upload missing",
+      "description": "No preview of uploaded logo before polling completes. Consider showing uploaded file from browser cache immediately as preview, then replace with verified URL once verification succeeds."
+    },
+    {
+      "id": 6,
+      "label": "Search debounce cleanup missing",
+      "description": "PlayerSearch searchTimeout state is not cleared on unmount. Add cleanup function to prevent stale timeouts firing after navigation."
+    },
+    {
+      "id": 7,
+      "label": "Responsive image dimensions missing",
+      "description": "Team detail Image component uses unoptimized without explicit width/height, causing potential layout shift. Provide explicit dimensions or use aspect-ratio CSS."
+    },
+    {
+      "id": 8,
+      "label": "Archive action without implementation",
+      "description": "Team detail page shows Archive Team button with confirmation prompt but no actual delete/archive API call. Implement or remove UI."
+    }
+  ],
+  "reviewDoc": "d:\\UNDER-THE-HAMMER\\.agents\\tasks\\phase-e\\frontend-review.md"
+}

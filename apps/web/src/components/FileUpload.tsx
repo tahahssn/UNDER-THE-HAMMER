@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
-import { FileAssetKind } from '@/lib/types';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { FileAssetKind, FileAssetDto } from '@/lib/types';
 import { getUploadIntent, confirmUpload, verifyUpload } from '@/lib/api';
 import { calculateSHA256 } from '@/lib/crypto';
 import Button from './Button';
@@ -18,6 +18,10 @@ interface FileUploadProps {
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
 
+function isError(error: unknown): error is Error {
+  return error instanceof Error;
+}
+
 export default function FileUpload({
   kind,
   teamId,
@@ -26,15 +30,27 @@ export default function FileUpload({
   isLoading,
 }: FileUploadProps) {
   const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<
     'idle' | 'uploading-to-s3' | 'confirming' | 'verifying' | 'success'
   >('idle');
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragOverRef = useRef(false);
+  const verifyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (verifyTimeoutRef.current) {
+        clearTimeout(verifyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const validateFile = (f: File): string | null => {
     if (f.size > MAX_FILE_SIZE) {
@@ -51,10 +67,18 @@ export default function FileUpload({
     if (error) {
       setUploadError(error);
       setFile(null);
+      setPreview(null);
       return;
     }
     setUploadError(null);
     setFile(f);
+    
+    // Create preview from file immediately
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setPreview(e.target?.result as string);
+    };
+    reader.readAsDataURL(f);
   }, []);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -78,6 +102,50 @@ export default function FileUpload({
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       handleFileSelect(e.target.files[0]);
+    }
+  };
+
+  const pollFileStatus = async (uploadId: string, attempt: number = 0): Promise<void> => {
+    const maxAttempts = 180; // 3 minutes with exponential backoff
+    const baseDelay = 1000; // 1 second base delay
+    const maxDelay = 10000; // 10 second max delay
+    
+    // Exponential backoff: 1s, 2s, 4s, 8s, 10s, 10s...
+    const delay = Math.min(baseDelay * Math.pow(2, Math.floor(attempt / 10)), maxDelay);
+
+    if (attempt >= maxAttempts) {
+      throw new Error(
+        'Upload verification timeout. Please refresh the page to check status.'
+      );
+    }
+
+    try {
+      const verifyResponse = await verifyUpload(uploadId);
+
+      if (verifyResponse.success && verifyResponse.data) {
+        const fileData = verifyResponse.data;
+        if (fileData.status === 'READY') {
+          setUploadStatus('success');
+          onSuccess(fileData.id);
+          return;
+        } else if (fileData.status === 'REJECTED' || fileData.status === 'DELETED') {
+          throw new Error(`Upload rejected: ${fileData.status}`);
+        }
+      }
+
+      // Schedule next attempt with backoff
+      verifyTimeoutRef.current = setTimeout(() => {
+        pollFileStatus(uploadId, attempt + 1);
+      }, delay);
+    } catch (error: unknown) {
+      // Retry on network errors, but surface other errors immediately
+      if (attempt < maxAttempts) {
+        verifyTimeoutRef.current = setTimeout(() => {
+          pollFileStatus(uploadId, attempt + 1);
+        }, delay);
+      } else {
+        throw error;
+      }
     }
   };
 
@@ -106,7 +174,8 @@ export default function FileUpload({
         throw new Error(intentResponse.error || 'Failed to get upload intent');
       }
 
-      const { uploadId, presignedUrl } = intentResponse.data;
+      const { uploadId, presignedUrl, expiresAt: expiryTime } = intentResponse.data;
+      setExpiresAt(expiryTime);
 
       // Step 2: Upload file directly to S3
       const formData = new FormData();
@@ -118,6 +187,12 @@ export default function FileUpload({
       });
 
       if (!uploadXhrResponse.ok) {
+        // Check if 403 (URL expired)
+        if (uploadXhrResponse.status === 403) {
+          throw new Error(
+            'Upload URL expired. The upload session took too long. Please try again.'
+          );
+        }
         throw new Error(`S3 upload failed: ${uploadXhrResponse.statusText}`);
       }
 
@@ -139,32 +214,9 @@ export default function FileUpload({
 
       // Step 4: Verify upload and poll for ready status
       setUploadStatus('verifying');
-      let attempts = 0;
-      const maxAttempts = 30; // 30 seconds max with 1s intervals
-
-      while (attempts < maxAttempts) {
-        const verifyResponse = await verifyUpload(uploadId);
-
-        if (verifyResponse.success && verifyResponse.data) {
-          const fileData = verifyResponse.data;
-          if (fileData.status === 'READY') {
-            setUploadStatus('success');
-            onSuccess(fileData.id);
-            return;
-          } else if (fileData.status === 'REJECTED' || fileData.status === 'DELETED') {
-            throw new Error(`Upload rejected: ${fileData.status}`);
-          }
-        }
-
-        attempts++;
-        if (attempts < maxAttempts) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      }
-
-      throw new Error('Upload verification timeout');
-    } catch (error: any) {
-      const errorMessage = error?.message || 'Upload failed';
+      await pollFileStatus(uploadId);
+    } catch (error: unknown) {
+      const errorMessage = isError(error) ? error.message : 'Upload failed';
       setUploadError(errorMessage);
       onError(errorMessage);
     } finally {
@@ -174,10 +226,12 @@ export default function FileUpload({
 
   const handleClear = () => {
     setFile(null);
+    setPreview(null);
     setUploadError(null);
     setUploadProgress(0);
     setUploadStatus('idle' as const);
     setRightsConfirmed(false);
+    setExpiresAt(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -196,6 +250,18 @@ export default function FileUpload({
       default:
         return null;
     }
+  };
+
+  const getExpiryWarning = () => {
+    if (!expiresAt) return null;
+    const expiryDate = new Date(expiresAt);
+    const now = new Date();
+    const minutesLeft = Math.floor((expiryDate.getTime() - now.getTime()) / 60000);
+    
+    if (minutesLeft <= 2) {
+      return `⚠️ Upload URL expires in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}`;
+    }
+    return null;
   };
 
   if (uploadStatus === 'success') {
@@ -240,6 +306,7 @@ export default function FileUpload({
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
+            aria-label="Upload icon"
           >
             <path
               strokeLinecap="round"
@@ -274,6 +341,25 @@ export default function FileUpload({
           <p className="text-xs text-text-muted">
             {file.name} ({(file.size / 1024).toFixed(2)} KB)
           </p>
+        </Card>
+      )}
+
+      {/* File Preview */}
+      {preview && !isUploading && uploadStatus === 'idle' && (
+        <Card className="p-3">
+          <p className="mb-2 text-xs font-medium text-text-muted">Preview</p>
+          <img
+            src={preview}
+            alt="Preview"
+            className="h-auto w-full max-w-xs rounded-lg border border-border"
+          />
+        </Card>
+      )}
+
+      {/* URL Expiry Warning */}
+      {getExpiryWarning() && (
+        <Card className="border-warning bg-warning/10 p-3">
+          <p className="text-sm text-warning">{getExpiryWarning()}</p>
         </Card>
       )}
 

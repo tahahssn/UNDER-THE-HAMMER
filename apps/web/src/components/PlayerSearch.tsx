@@ -39,6 +39,16 @@ export default function PlayerSearch({
 
   // Debounce search
   const [searchTimeout, setSearchTimeout] = React.useState<NodeJS.Timeout | null>(null);
+
+  // Cleanup timeout on unmount
+  React.useEffect(() => {
+    return () => {
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+      }
+    };
+  }, [searchTimeout]);
+
   const handleSearchChange = useCallback((value: string) => {
     setSearch(value);
     if (searchTimeout) clearTimeout(searchTimeout);

@@ -4,7 +4,23 @@
 
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import { API_CONFIG } from './constants';
-import { ApiResponse, AuthResponse, News, Match, Auction } from './types';
+import {
+  ApiResponse,
+  AuthResponse,
+  News,
+  Match,
+  Auction,
+  PlayerSearchResponse,
+  PlayerDetailDto,
+  TeamDetailDto,
+  TeamCreateDto,
+  TeamUpdateDto,
+  FileAssetDto,
+  UploadIntentRequest,
+  UploadIntentResponse,
+  ConfirmUploadRequest,
+  DownloadUrlResponse,
+} from './types';
 
 let authToken: string | null = null;
 
@@ -204,7 +220,7 @@ export const getPlayers = async (params: {
   country?: string;
   skip?: number;
   take?: number;
-} = {}): Promise<ApiResponse<any>> => {
+} = {}): Promise<ApiResponse<PlayerSearchResponse>> => {
   try {
     const response = await api.get('/api/players', {
       params: {
@@ -222,7 +238,7 @@ export const getPlayers = async (params: {
   }
 };
 
-export const searchPlayers = async (query: string): Promise<ApiResponse<any>> => {
+export const searchPlayers = async (query: string): Promise<ApiResponse<PlayerSearchResponse>> => {
   try {
     const response = await api.get('/api/players', {
       params: { search: query, skip: 0, take: 20 },
@@ -236,7 +252,7 @@ export const searchPlayers = async (query: string): Promise<ApiResponse<any>> =>
   }
 };
 
-export const getPlayerById = async (id: string): Promise<ApiResponse<any>> => {
+export const getPlayerById = async (id: string): Promise<ApiResponse<PlayerDetailDto>> => {
   try {
     const response = await api.get(`/api/players/${id}`);
     return response.data;
@@ -311,7 +327,7 @@ export const getAuctionById = async (id: string): Promise<ApiResponse<Auction>> 
 };
 
 // Team endpoints - Phase E
-export const getMyTeams = async (): Promise<ApiResponse<any>> => {
+export const getMyTeams = async (): Promise<ApiResponse<{ teams: TeamDetailDto[] }>> => {
   try {
     const response = await api.get('/api/teams');
     return response.data;
@@ -323,7 +339,7 @@ export const getMyTeams = async (): Promise<ApiResponse<any>> => {
   }
 };
 
-export const getTeamById = async (id: string): Promise<ApiResponse<any>> => {
+export const getTeamById = async (id: string): Promise<ApiResponse<TeamDetailDto>> => {
   try {
     const response = await api.get(`/api/teams/${id}`);
     return response.data;
@@ -335,7 +351,7 @@ export const getTeamById = async (id: string): Promise<ApiResponse<any>> => {
   }
 };
 
-export const createTeam = async (data: any): Promise<ApiResponse<any>> => {
+export const createTeam = async (data: TeamCreateDto): Promise<ApiResponse<TeamDetailDto>> => {
   try {
     const response = await api.post('/api/teams', data);
     return response.data;
@@ -347,7 +363,10 @@ export const createTeam = async (data: any): Promise<ApiResponse<any>> => {
   }
 };
 
-export const updateTeam = async (id: string, data: any): Promise<ApiResponse<any>> => {
+export const updateTeam = async (
+  id: string,
+  data: TeamUpdateDto
+): Promise<ApiResponse<TeamDetailDto>> => {
   try {
     const response = await api.patch(`/api/teams/${id}`, data);
     return response.data;
@@ -359,7 +378,7 @@ export const updateTeam = async (id: string, data: any): Promise<ApiResponse<any
   }
 };
 
-export const deleteTeam = async (id: string): Promise<ApiResponse<any>> => {
+export const deleteTeam = async (id: string): Promise<ApiResponse<null>> => {
   try {
     const response = await api.delete(`/api/teams/${id}`);
     return response.data;
@@ -372,7 +391,9 @@ export const deleteTeam = async (id: string): Promise<ApiResponse<any>> => {
 };
 
 // File Upload endpoints - Phase E
-export const getUploadIntent = async (payload: any): Promise<ApiResponse<any>> => {
+export const getUploadIntent = async (
+  payload: UploadIntentRequest
+): Promise<ApiResponse<UploadIntentResponse>> => {
   try {
     const response = await api.post('/api/files/upload-intent', payload);
     return response.data;
@@ -384,7 +405,9 @@ export const getUploadIntent = async (payload: any): Promise<ApiResponse<any>> =
   }
 };
 
-export const confirmUpload = async (payload: any): Promise<ApiResponse<any>> => {
+export const confirmUpload = async (
+  payload: ConfirmUploadRequest
+): Promise<ApiResponse<FileAssetDto>> => {
   try {
     const response = await api.post('/api/files/confirm-upload', payload);
     return response.data;
@@ -396,7 +419,7 @@ export const confirmUpload = async (payload: any): Promise<ApiResponse<any>> => 
   }
 };
 
-export const verifyUpload = async (uploadId: string): Promise<ApiResponse<any>> => {
+export const verifyUpload = async (uploadId: string): Promise<ApiResponse<FileAssetDto>> => {
   try {
     const response = await api.get(`/api/files/${uploadId}`);
     return response.data;
@@ -408,7 +431,7 @@ export const verifyUpload = async (uploadId: string): Promise<ApiResponse<any>> 
   }
 };
 
-export const getDownloadUrl = async (fileId: string): Promise<ApiResponse<any>> => {
+export const getDownloadUrl = async (fileId: string): Promise<ApiResponse<DownloadUrlResponse>> => {
   try {
     const response = await api.get(`/api/files/${fileId}/download-url`);
     return response.data;

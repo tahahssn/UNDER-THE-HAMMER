@@ -74,8 +74,9 @@ export default function TeamForm({
     try {
       setSubmitError(null);
       await onSubmit(data);
-    } catch (error: any) {
-      setSubmitError(error?.message || 'Failed to submit form');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to submit form';
+      setSubmitError(message);
     }
   };
 

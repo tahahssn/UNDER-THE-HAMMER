@@ -2,12 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import Link from 'next/link';
 import { PageHeader } from '@/components/PageHeader';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
-import { getTeamById, getDownloadUrl } from '@/lib/api';
+import { getTeamById, getDownloadUrl, deleteTeam } from '@/lib/api';
 import { TeamDetailDto } from '@/lib/types';
 
 interface TeamDetailPageProps {
@@ -22,6 +21,8 @@ export default function TeamDetailPage({ params }: TeamDetailPageProps) {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadTeam = async () => {
@@ -42,7 +43,7 @@ export default function TeamDetailPage({ params }: TeamDetailPageProps) {
         } else {
           setError(response.error || 'Team not found');
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.error('Failed to load team:', err);
         setError('Failed to load team details');
       } finally {
@@ -52,6 +53,31 @@ export default function TeamDetailPage({ params }: TeamDetailPageProps) {
 
     loadTeam();
   }, [params.id]);
+
+  const handleArchiveTeam = async () => {
+    if (!team || !confirm('Are you sure you want to archive this team?')) {
+      return;
+    }
+
+    setIsArchiving(true);
+    setArchiveError(null);
+
+    try {
+      const response = await deleteTeam(team.id);
+      
+      if (response.success) {
+        // Redirect to teams list after successful archive
+        router.push('/teams');
+      } else {
+        setArchiveError(response.error || 'Failed to archive team');
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to archive team';
+      setArchiveError(message);
+    } finally {
+      setIsArchiving(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -194,13 +220,13 @@ export default function TeamDetailPage({ params }: TeamDetailPageProps) {
             <h2 className="mb-4 text-lg font-semibold text-text">Team Logo</h2>
             {logoUrl ? (
               <div className="mb-4 max-w-sm">
-                <Image
+                <img
                   src={logoUrl}
                   alt={`${team.name} logo`}
                   width={500}
                   height={500}
                   className="h-auto w-full rounded-lg border border-border"
-                  unoptimized
+                  style={{ aspectRatio: '1 / 1', objectFit: 'cover' }}
                 />
               </div>
             ) : (
@@ -217,6 +243,11 @@ export default function TeamDetailPage({ params }: TeamDetailPageProps) {
 
           {/* Actions */}
           <Card className="bg-background p-4">
+            {archiveError && (
+              <div className="mb-4 rounded-lg border border-error bg-error/10 p-3">
+                <p className="text-sm text-error">{archiveError}</p>
+              </div>
+            )}
             <div className="flex flex-wrap gap-3">
               <Link href={`/teams/${team.id}/edit`}>
                 <Button variant="secondary" size="sm">
@@ -226,13 +257,10 @@ export default function TeamDetailPage({ params }: TeamDetailPageProps) {
               <Button
                 variant="danger"
                 size="sm"
-                onClick={() => {
-                  if (confirm('Are you sure you want to archive this team?')) {
-                    // Delete action would go here
-                  }
-                }}
+                onClick={handleArchiveTeam}
+                disabled={isArchiving}
               >
-                Archive Team
+                {isArchiving ? 'Archiving...' : 'Archive Team'}
               </Button>
             </div>
           </Card>
