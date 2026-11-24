@@ -196,16 +196,66 @@ export const getLiveMatches = async (): Promise<ApiResponse<any>> => {
   }
 };
 
-// Player endpoints
-// TODO: Phase M — implement when player/stats API is ready
-export const getPlayers = async (page: number = 1, pageSize: number = 20): Promise<ApiResponse<any>> => {
+// Player endpoints - Phase E
+export const getPlayers = async (params: {
+  search?: string;
+  category?: string;
+  role?: string;
+  country?: string;
+  skip?: number;
+  take?: number;
+} = {}): Promise<ApiResponse<any>> => {
   try {
-    const response = await api.get('/api/players', { params: { page, pageSize } });
+    const response = await api.get('/api/players', {
+      params: {
+        skip: params.skip ?? 0,
+        take: params.take ?? 20,
+        ...params,
+      },
+    });
     return response.data;
   } catch (error) {
     return {
       success: false,
       error: 'Failed to fetch players',
+    };
+  }
+};
+
+export const searchPlayers = async (query: string): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get('/api/players', {
+      params: { search: query, skip: 0, take: 20 },
+    });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to search players',
+    };
+  }
+};
+
+export const getPlayerById = async (id: string): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get(`/api/players/${id}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to fetch player',
+    };
+  }
+};
+
+export const getPlayerCategories = async (): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get('/api/player-categories');
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to fetch player categories',
     };
   }
 };
@@ -260,9 +310,8 @@ export const getAuctionById = async (id: string): Promise<ApiResponse<Auction>> 
   }
 };
 
-// Team endpoints
-// TODO: Phase E — implement when team management is ready
-export const getUserTeams = async (): Promise<ApiResponse<any>> => {
+// Team endpoints - Phase E
+export const getMyTeams = async (): Promise<ApiResponse<any>> => {
   try {
     const response = await api.get('/api/teams');
     return response.data;
@@ -270,6 +319,103 @@ export const getUserTeams = async (): Promise<ApiResponse<any>> => {
     return {
       success: false,
       error: 'Failed to fetch teams',
+    };
+  }
+};
+
+export const getTeamById = async (id: string): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get(`/api/teams/${id}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to fetch team',
+    };
+  }
+};
+
+export const createTeam = async (data: any): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.post('/api/teams', data);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to create team',
+    };
+  }
+};
+
+export const updateTeam = async (id: string, data: any): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.patch(`/api/teams/${id}`, data);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to update team',
+    };
+  }
+};
+
+export const deleteTeam = async (id: string): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.delete(`/api/teams/${id}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to delete team',
+    };
+  }
+};
+
+// File Upload endpoints - Phase E
+export const getUploadIntent = async (payload: any): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.post('/api/files/upload-intent', payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to get upload intent',
+    };
+  }
+};
+
+export const confirmUpload = async (payload: any): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.post('/api/files/confirm-upload', payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to confirm upload',
+    };
+  }
+};
+
+export const verifyUpload = async (uploadId: string): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get(`/api/files/${uploadId}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to verify upload',
+    };
+  }
+};
+
+export const getDownloadUrl = async (fileId: string): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get(`/api/files/${fileId}/download-url`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to get download URL',
     };
   }
 };
