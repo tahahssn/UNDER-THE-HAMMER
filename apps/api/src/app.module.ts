@@ -14,6 +14,10 @@ import { PlayerCategoriesModule } from './player-categories/player-categories.mo
 import { TeamsModule } from './teams/teams.module';
 import { FilesModule } from './files/files.module';
 import { AssetModerationModule } from './asset-moderation/asset-moderation.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { TournamentsModule } from './tournaments/tournaments.module';
+import { RoomsModule } from './rooms/rooms.module';
+import { RoomInvitationsModule } from './room-invitations/room-invitations.module';
 
 @Module({
   imports: [
@@ -41,6 +45,10 @@ import { AssetModerationModule } from './asset-moderation/asset-moderation.modul
     TeamsModule,
     FilesModule,
     AssetModerationModule,
+    SubscriptionsModule,
+    TournamentsModule,
+    RoomsModule,
+    RoomInvitationsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
