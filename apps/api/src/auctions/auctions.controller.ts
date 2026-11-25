@@ -107,4 +107,82 @@ export class AuctionsController {
     const data = DrawPlayerAutomaticDtoSchema.parse({ ...body, auctionId, userId });
     return this.auctionsService.drawPlayerAutomatic(auctionId, userId);
   }
+
+  // ===== Break Management =====
+
+  @Get(':auctionId/break/status')
+  async getBreakStatus(
+    @Param('auctionId') auctionId: string
+  ) {
+    return this.auctionsService.getBreakStatus(auctionId);
+  }
+
+  @Post(':auctionId/break/begin')
+  async beginBreak(
+    @Param('auctionId') auctionId: string,
+    @Body() body: any,
+    @CurrentUser('sub') userId: string
+  ) {
+    return this.auctionsService.beginBreak(auctionId, body.durationSeconds, userId, body.reason);
+  }
+
+  @Post(':auctionId/break/extend')
+  async extendBreak(
+    @Param('auctionId') auctionId: string,
+    @Body() body: any,
+    @CurrentUser('sub') userId: string
+  ) {
+    return this.auctionsService.extendBreak(auctionId, body.extensionSeconds, userId);
+  }
+
+  @Post(':auctionId/break/reduce')
+  async reduceBreak(
+    @Param('auctionId') auctionId: string,
+    @Body() body: any,
+    @CurrentUser('sub') userId: string
+  ) {
+    return this.auctionsService.reduceBreak(auctionId, body.reductionSeconds, userId);
+  }
+
+  @Post(':auctionId/break/end')
+  async endBreak(
+    @Param('auctionId') auctionId: string,
+    @Body() body: any,
+    @CurrentUser('sub') userId: string
+  ) {
+    return this.auctionsService.endBreak(auctionId, userId);
+  }
+
+  // ===== Squad Management =====
+
+  @Get(':auctionId/squads/rules')
+  async getSquadRules(
+    @Param('auctionId') auctionId: string
+  ) {
+    return this.auctionsService.getSquadRules(auctionId);
+  }
+
+  @Get(':auctionId/squads/:auctionTeamId/progress')
+  async getSquadProgress(
+    @Param('auctionId') auctionId: string,
+    @Param('auctionTeamId') auctionTeamId: string
+  ) {
+    return this.auctionsService.getSquadProgress(auctionId, auctionTeamId);
+  }
+
+  @Get(':auctionId/squads/:auctionTeamId/validation')
+  async getLatestSquadValidation(
+    @Param('auctionId') auctionId: string,
+    @Param('auctionTeamId') auctionTeamId: string
+  ) {
+    return this.auctionsService.getLatestSquadValidation(auctionId, auctionTeamId);
+  }
+
+  @Post(':auctionId/squads/:auctionTeamId/validate')
+  async validateSquadRequirements(
+    @Param('auctionId') auctionId: string,
+    @Param('auctionTeamId') auctionTeamId: string
+  ) {
+    return this.auctionsService.validateSquadRequirements(auctionId, auctionTeamId);
+  }
 }

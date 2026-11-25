@@ -1,0 +1,123 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "reviewDate": "2026-11-25",
+  "reviewDoc": "d:\\UNDER-THE-HAMMER\\.agents\\tasks\\phase-h-design-review.md",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "title": "Break state machine ambiguity: nested or separate phase?",
+      "description": "Plan does not clarify whether BREAK is a separate top-level phase or nested state within BIDDING. This affects event sequencing, timeout handling, frontend rendering, and database schema.",
+      "location": "Plan overview, item 1, state machine digest",
+      "fix": "Update plan to explicitly state: Break is a separate top-level phase with Auction.phase = BREAK. When phase is BREAK, no bids accepted. Break starts with BREAK_STARTED event, ends with BREAK_ENDED, triggering phase transition back to BIDDING."
+    },
+    {
+      "id": 2,
+      "severity": "HIGH",
+      "title": "Break counter scope resolution: plan assumes PER_PLAYER without product sign-off",
+      "description": "Plan assumes break counter scope is PER_PLAYER but PRD and AGENTS.md explicitly state scope must be configurable or explicitly resolved. No documentation that this choice has product approval.",
+      "location": "Plan 'Assumptions and unresolved items' section, item 1; item 8",
+      "fix": "Before implementation: (1) Obtain explicit product confirmation on scope (PER_PLAYER vs PER_AUCTION vs configurable). (2) Update plan items 1, 2, 8, and 'Open decisions' with confirmed scope and rationale. (3) Update item 18 validation schema to validate breakCounterScope enum."
+    },
+    {
+      "id": 3,
+      "severity": "HIGH",
+      "title": "Squad validation at settlement: exact enforcement timing unclear",
+      "description": "Plan defers squad validation UX to 'Phase J' but does not specify whether validation blocks settlement (error) or warns (info). Item 7 (SettlementService) assumes validation is called but lacks return type or error handling specification.",
+      "location": "Plan item 7, item 20, 'Open decisions' section (D-13)",
+      "fix": "Confirm with product: does incomplete squad block settlement or allow completion with warning? Update item 7 to specify exact error handling. Update item 20 integration test to test both paths: blocked and warning. Move D-13 from 'deferred' to 'confirmed'."
+    },
+    {
+      "id": 4,
+      "severity": "HIGH",
+      "title": "Frontend Socket.IO reconnect handling: strategy unspecified",
+      "description": "Plan items 15–16 describe Socket.IO hooks and state context but do not specify how break and squad state are reconciled on reconnect. Ambiguity on refetch vs. event-only strategy can cause inconsistent UI state.",
+      "location": "Plan items 11, 15–16 (useBreakTimer, useBreakSocket, AuctionContext)",
+      "fix": "Clarify: on reconnect, client must fetch current break status via GET /v1/auctions/:auctionId/breaks/current **before** subscribing to real-time events. Add to item 15: useEffect hook that refetches on socket.connected. Update item 20 integration test: disconnect during break, verify BreakTimer reconciles deadline correctly."
+    },
+    {
+      "id": 5,
+      "severity": "HIGH",
+      "title": "Break adjustment permissions: no optimistic concurrency or idempotency strategy",
+      "description": "Item 4 endpoint (POST /breaks/:breakId/adjust) is host-only but lacks version check, idempotency key, or concurrent modification handling. Two simultaneous requests could collide with lost updates.",
+      "location": "Plan item 4 (endpoint definition), item 20 (integration test)",
+      "fix": "Add version check to adjust endpoint: POST /breaks/:breakId/adjust { adjustmentSeconds: int, expectedDeadline?: DateTime }. Backend validates expectedDeadline matches current deadline; rejects if mismatch. Update item 20 integration test: add scenario 'concurrent host adjustments', verify second request is rejected or version-validated."
+    },
+    {
+      "id": 6,
+      "severity": "MEDIUM",
+      "title": "Break reason field: enum or free-text string?",
+      "description": "AuctionBreak.reason is a string in schema. Plan does not specify whether reasons are enumerated (e.g., 'AUTOMATIC_TRIGGER', 'HOST_ADJUSTMENT') or free-form. Frontend needs to know for localization.",
+      "location": "Plan item 1 (repo method), item 3 (BreakDto), item 6 (events)",
+      "fix": "Define enum: BreakReason = 'BID_COUNT_THRESHOLD' | 'HOST_REQUESTED'. Update item 1 to validate reason against enum. Update item 3 BreakDto to use reason enum. Document reason values and localization in item 23."
+    },
+    {
+      "id": 7,
+      "severity": "MEDIUM",
+      "title": "BreakManagerService bidCounter: in-memory state lost on restart",
+      "description": "Plan item 1 notes BreakManagerService has private bidCounters: Map. This in-memory map is lost on server restart, causing incorrect break triggering after restart. Violates AGENTS.md § 4 requirement to persist state.",
+      "location": "Plan item 1 (BreakManagerService), item 8 (bid acceptance integration)",
+      "fix": "Remove bidCounters Map from BreakManagerService. Add method to AuctionsRepository: getBidCountForAuction(auctionId, scope): Promise<number>. Query database to count bids since last player intro (PER_PLAYER) or since auction start (PER_AUCTION). Item 8: after bid accepted, fetch count from DB. Update item 20 integration test: restart server mid-auction, verify bid counter recovers correctly."
+    },
+    {
+      "id": 8,
+      "severity": "MEDIUM",
+      "title": "Squad progress initialization: idempotency and late-join scenarios unclear",
+      "description": "Plan item 19 says 'initialize progress on DRAFT→LIVE' but does not specify idempotency or what happens if initialization is called twice or if team joins after LIVE.",
+      "location": "Plan item 19 (AuctionStateService), item 2 (SquadsService)",
+      "fix": "Update item 2 SquadsService: method initializeProgressForTeam(teamId, force=false). If force=false and progress exists, return early. Item 19: call initialization for each team on DRAFT→LIVE. Add to item 20 integration test: verify initialization is idempotent (no duplicate records)."
+    },
+    {
+      "id": 9,
+      "severity": "MEDIUM",
+      "title": "BreakTimer reconciliation: behavior if deadline has passed",
+      "description": "Plan item 11 (useBreakTimer) says 'reconciliation on every state update' but does not specify behavior if server deadline has already passed. Countdown will show negative or zero; component must handle gracefully.",
+      "location": "Plan item 11 (useBreakTimer hook), item 20 (integration test)",
+      "fix": "Update item 11 implementation note: if deadline <= now, do not render timer; if phase is BREAK, fetch current auction state; if phase changed, trigger phase transition. Add to item 20 integration test: reconnect **after** break ends, verify UI transitions correctly."
+    },
+    {
+      "id": 10,
+      "severity": "MEDIUM",
+      "title": "Frontend responsive layout for break overlay: mobile specifics missing",
+      "description": "Plan items 12–13 mention BreakScreen component but do not detail mobile-specific layout. DESIGN.md § 10 requires 'Move chat and detailed squad views into tabs/drawers' on mobile.",
+      "location": "Plan items 12–13 (BreakScreen, BreakControls), item 17 (AuctionRoomLayout)",
+      "fix": "Update item 12 to specify responsive layout: Desktop (1024px+) side-by-side timer/squad; Tablet (768px) stacked; Mobile (375px) full-height timer, squad in scrollable drawer, host controls in fixed footer. Item 13: render controls as fixed footer on mobile. Add to item 21: responsive tests at 375px, 768px, 1024px, 1440px."
+    },
+    {
+      "id": 11,
+      "severity": "MEDIUM",
+      "title": "Squad rule configuration: host-editable after auction start?",
+      "description": "Plan item 18 validates squad rules at room creation but does not state whether host can edit rules after auction starts. AGENTS.md § 4 requires audit and explicit policy for mid-auction changes.",
+      "location": "Plan item 18 (validation schema), AGENTS.md § 4",
+      "fix": "Update item 18 validation note: 'Squad rules are frozen at auction start; no edits allowed after DRAFT phase ends.' Add database constraint if needed. Add to item 20 integration test: attempt to edit rules after auction start, verify rejection. Document in item 23: squad rules are immutable during auction."
+    },
+    {
+      "id": 12,
+      "severity": "NIT",
+      "title": "DTOs lack serialization annotations",
+      "description": "Plan item 3 defines DTOs but does not specify serialization (e.g., camelCase ↔ snake_case mapping). Low impact but improves code clarity.",
+      "location": "Plan item 3 (DTOs), items 4–5 (API endpoints)",
+      "fix": "Update item 3 DTO definitions to include @Expose/@Transform annotations for serialization (e.g., secondsRemaining calculation)."
+    },
+    {
+      "id": 13,
+      "severity": "NIT",
+      "title": "Event sequence not mentioned for break/squad events",
+      "description": "Plan item 6–7 defines event types but does not specify how event sequence is assigned. Low impact — existing phase G likely has pattern.",
+      "location": "Plan items 6–7 (event types), item 23 (documentation)",
+      "fix": "Update item 6–7 to note: 'Break and squad events follow existing AuctionEvent.sequence pattern; sequencer increments automatically.'"
+    },
+    {
+      "id": 14,
+      "severity": "NIT",
+      "title": "TypeScript strict mode: squad rule types incomplete",
+      "description": "Plan item 2 SquadsService methods do not fully specify types for squad rule parameters (role, categoryId, minCount, maxCount). Minor type clarity issue.",
+      "location": "Plan item 2 (SquadsService)",
+      "fix": "Ensure all SquadsService methods explicitly type role (PlayerRoleType | null), categoryId, minCount, maxCount parameters; avoid any."
+    }
+  ],
+  "highCount": 5,
+  "mediumCount": 6,
+  "nitCount": 3,
+  "recommendation": "Resolve all HIGH findings and document answers in plan before assigning implementation tasks. Plan cannot proceed without clarifications on: (1) break phase semantics, (2) counter scope decision, (3) squad validation timing, (4) reconnect logic, (5) concurrent update handling."
+}

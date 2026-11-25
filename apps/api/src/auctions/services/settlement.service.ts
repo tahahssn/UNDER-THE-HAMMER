@@ -2,6 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuctionsRepository } from '../auctions.repository';
 import { PurseLedgerService } from './purse-ledger.service';
+import { SquadsService } from './squads.service';
 import { LEDGER_ERRORS } from '../constants/auction-errors';
 
 @Injectable()
@@ -9,7 +10,8 @@ export class SettlementService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly repo: AuctionsRepository,
-    private readonly purseLedger: PurseLedgerService
+    private readonly purseLedger: PurseLedgerService,
+    private readonly squadsService: SquadsService
   ) {}
 
   /**
@@ -53,7 +55,13 @@ export class SettlementService {
   /**
    * Idempotent settlement: check if player already settled before attempting
    */
-  async idempotentSettle(auctionId: string, auctionPlayerId: string, auctionTeamId: string, bidId: string, priceMinor: bigint) {
+  async idempotentSettle(
+    auctionId: string,
+    auctionPlayerId: string,
+    auctionTeamId: string,
+    bidId: string,
+    priceMinor: bigint
+  ) {
     // Check for prior settlement
     const existing = await this.prisma.playerAcquisition.findFirst({
       where: { auctionId, auctionPlayerId },
@@ -68,7 +76,7 @@ export class SettlementService {
   }
 
   /**
-   * Mark player as sold with confirmation
+   * Mark player as sold with confirmation and validate squad requirements
    */
   async markPlayerSold(auctionId: string, playerId: string, teamId: string, priceMinor: bigint) {
     // Update player status
@@ -83,6 +91,9 @@ export class SettlementService {
       where: { id: teamId },
       data: { purseBalanceMinor: balance },
     });
+
+    // Validate squad requirements (audit trail only, not enforcement)
+    await this.squadsService.validateSquadRequirements(auctionId, teamId);
   }
 
   /**
@@ -106,5 +117,16 @@ export class SettlementService {
     }
 
     return players.length;
+  }
+
+  /**
+   * Final squad validation for all teams at auction conclusion
+   */
+  async validateAllSquadsAtConclusion(auctionId: string) {
+    const teams = await this.repo.getAuctionTeams(auctionId);
+
+    for (const team of teams) {
+      await this.squadsService.validateSquadRequirements(auctionId, team.id);
+    }
   }
 }

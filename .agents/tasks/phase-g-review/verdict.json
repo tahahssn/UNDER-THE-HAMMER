@@ -1,0 +1,51 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": "BRACKET_FIELD_MISMATCH",
+      "severity": "CRITICAL",
+      "category": "Schema Mismatch",
+      "title": "Repository Uses Wrong Database Field Name for Bracket Ordering",
+      "description": "getAuctionIncrementBrackets() attempts to order by 'fromAmountMinor' which does not exist in schema. Schema defines 'sortOrder' (Int) for bracket ordering. This was introduced during the fix commits and breaks Prisma code generation.",
+      "files": [
+        "apps/api/src/auctions/auctions.repository.ts:172"
+      ],
+      "consequence": "Prisma TypeScript generation fails. Bid validation cannot fetch brackets. All bid operations fail. Auction cannot proceed. System is non-functional.",
+      "correction": "Change line 172 from 'orderBy: { fromAmountMinor: \"asc\" }' to 'orderBy: { sortOrder: \"asc\" }'. Field name must match schema: AuctionIncrementBracket.sortOrder (packages/database/prisma/schema.prisma:959).",
+      "evidence": {
+        "schema_location": "packages/database/prisma/schema.prisma:956-970",
+        "schema_fields": ["sortOrder (Int)", "fromMinor (BigInt)", "toMinor (BigInt?)", "incrementMinor (BigInt)"],
+        "code_field_used": "fromAmountMinor",
+        "code_service_using_brackets": "apps/api/src/auctions/services/bid-validation.service.ts:93-116 (correctly uses bracket.fromMinor, bracket.toMinor, bracket.incrementMinor)"
+      }
+    },
+    {
+      "id": "TYPE_SAFETY_TRANSACTION_CAST",
+      "severity": "HIGH",
+      "category": "Type Safety",
+      "title": "Type Cast to 'any' Violates Strict Mode",
+      "description": "Transaction wrapper in repository uses 'as any' cast (line 186) instead of proper TypeScript typing. This masks type errors and violates strict mode compliance required by AGENTS.md §5.",
+      "files": [
+        "apps/api/src/auctions/auctions.repository.ts:186"
+      ],
+      "consequence": "Type safety weakened. Future refactoring may accidentally call service-specific methods that don't exist on transaction context.",
+      "correction": "Remove 'as any' cast. Update function signature to: 'fn: (prisma: PrismaService | any) => Promise<T>' or define a protocol type for transaction context.",
+      "evidence": {
+        "line_186": "return fn(tx as any);",
+        "requirement": "AGENTS.md §5 Coding standards: Avoid 'any'; explain exceptional use.",
+        "note": "This is lower priority than BRACKET_FIELD_MISMATCH as the code still functions, but violates style guidelines."
+      }
+    }
+  ],
+  "reviewDoc": "d:\\UNDER-THE-HAMMER\\.agents\\tasks\\phase-g-review\\review.md",
+  "summary": {
+    "total_findings": 2,
+    "critical": 1,
+    "high": 1,
+    "blocking_deployment": true,
+    "tests_passing": 12,
+    "tests_skipped": 87,
+    "previously_resolved_findings": 7,
+    "recommendation": "Fix BRACKET_FIELD_MISMATCH (1-line change), re-run TypeScript compilation, then re-request review. Architecture is sound once field name is corrected."
+  }
+}

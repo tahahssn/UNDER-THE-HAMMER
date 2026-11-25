@@ -297,4 +297,328 @@ export class AuctionsService {
   async getTeams(auctionId: string) {
     return this.repo.getAuctionTeams(auctionId);
   }
+
+  // ===== Break Management =====
+
+  /**
+   * Get current break status
+   */
+  async getBreakStatus(auctionId: string) {
+    // Injected via gateway/context in real implementation
+    // For now, return break status
+    return this.getBreakStatusInternal(auctionId);
+  }
+
+  async getBreakStatusInternal(auctionId: string) {
+    const breakRecord = await this.repo.getActiveBreak(auctionId);
+    if (!breakRecord) {
+      return null;
+    }
+
+    const now = new Date();
+    const timeRemaining = Math.max(0, Math.floor((breakRecord.deadline.getTime() - now.getTime()) / 1000));
+
+    return {
+      id: breakRecord.id,
+      startedAt: breakRecord.startedAt,
+      deadline: breakRecord.deadline,
+      secondsRemaining: timeRemaining,
+      originalDurationSeconds: breakRecord.originalDurationSeconds,
+      reason: breakRecord.reason,
+      isExpired: timeRemaining === 0,
+    };
+  }
+
+  /**
+   * Begin a break (host action)
+   */
+  async beginBreak(auctionId: string, durationSeconds: number, userId: string, reason?: string) {
+    const auction = await this.repo.getAuctionById(auctionId);
+    if (!auction) {
+      throw new BadRequestException(AUCTION_ERRORS.AUCTION_NOT_FOUND);
+    }
+
+    if (auction.room?.hostUserId !== userId) {
+      throw new ForbiddenException(AUCTION_ERRORS.NOT_HOST);
+    }
+
+    // Break can be manually triggered or automatic
+    const breakRecord = await this.repo.recordBreak({
+      auctionId,
+      startedAt: new Date(),
+      deadline: new Date(new Date().getTime() + durationSeconds * 1000),
+      originalDurationSeconds: durationSeconds,
+      reason,
+    });
+
+    await this.eventStore.recordEvent(auctionId, 'break:started', {
+      breakId: breakRecord.id,
+      durationSeconds,
+      reason,
+    });
+
+    return breakRecord;
+  }
+
+  /**
+   * Extend break (host action)
+   */
+  async extendBreak(auctionId: string, extensionSeconds: number, userId: string) {
+    const auction = await this.repo.getAuctionById(auctionId);
+    if (!auction) {
+      throw new BadRequestException(AUCTION_ERRORS.AUCTION_NOT_FOUND);
+    }
+
+    if (auction.room?.hostUserId !== userId) {
+      throw new ForbiddenException(AUCTION_ERRORS.NOT_HOST);
+    }
+
+    const breakRecord = await this.repo.getActiveBreak(auctionId);
+    if (!breakRecord) {
+      throw new BadRequestException('No active break found');
+    }
+
+    if (extensionSeconds <= 0 || extensionSeconds > 300) {
+      throw new BadRequestException('Extension must be between 1 and 300 seconds');
+    }
+
+    const updated = await this.repo.updateBreak(breakRecord.id, {
+      deadline: new Date(breakRecord.deadline.getTime() + extensionSeconds * 1000),
+    });
+
+    await this.eventStore.recordEvent(auctionId, 'break:extended', {
+      breakId: breakRecord.id,
+      extensionSeconds,
+      newDeadline: updated.deadline,
+    });
+
+    return updated;
+  }
+
+  /**
+   * Reduce break (host action)
+   */
+  async reduceBreak(auctionId: string, reductionSeconds: number, userId: string) {
+    const auction = await this.repo.getAuctionById(auctionId);
+    if (!auction) {
+      throw new BadRequestException(AUCTION_ERRORS.AUCTION_NOT_FOUND);
+    }
+
+    if (auction.room?.hostUserId !== userId) {
+      throw new ForbiddenException(AUCTION_ERRORS.NOT_HOST);
+    }
+
+    const breakRecord = await this.repo.getActiveBreak(auctionId);
+    if (!breakRecord) {
+      throw new BadRequestException('No active break found');
+    }
+
+    if (reductionSeconds <= 0 || reductionSeconds > 300) {
+      throw new BadRequestException('Reduction must be between 1 and 300 seconds');
+    }
+
+    const newDeadline = new Date(
+      Math.max(
+        new Date().getTime() + 1000, // At least 1 second remains
+        breakRecord.deadline.getTime() - reductionSeconds * 1000
+      )
+    );
+
+    const updated = await this.repo.updateBreak(breakRecord.id, {
+      deadline: newDeadline,
+    });
+
+    await this.eventStore.recordEvent(auctionId, 'break:reduced', {
+      breakId: breakRecord.id,
+      reductionSeconds,
+      newDeadline: updated.deadline,
+    });
+
+    return updated;
+  }
+
+  /**
+   * End break (host action)
+   */
+  async endBreak(auctionId: string, userId: string) {
+    const auction = await this.repo.getAuctionById(auctionId);
+    if (!auction) {
+      throw new BadRequestException(AUCTION_ERRORS.AUCTION_NOT_FOUND);
+    }
+
+    if (auction.room?.hostUserId !== userId) {
+      throw new ForbiddenException(AUCTION_ERRORS.NOT_HOST);
+    }
+
+    const breakRecord = await this.repo.getActiveBreak(auctionId);
+    if (!breakRecord) {
+      throw new BadRequestException('No active break found');
+    }
+
+    const updated = await this.repo.updateBreak(breakRecord.id, {
+      endedAt: new Date(),
+    });
+
+    await this.eventStore.recordEvent(auctionId, 'break:ended', {
+      breakId: breakRecord.id,
+    });
+
+    return updated;
+  }
+
+  // ===== Squad Management =====
+
+  /**
+   * Get squad rules for an auction
+   */
+  async getSquadRules(auctionId: string) {
+    return this.prisma.squadRule.findMany({
+      where: { auctionId },
+      include: { category: true },
+      orderBy: { type: 'asc' },
+    });
+  }
+
+  /**
+   * Get squad progress for a team
+   */
+  async getSquadProgress(auctionId: string, auctionTeamId: string) {
+    // This would be injected in the actual implementation
+    return this.getSquadProgressInternal(auctionId, auctionTeamId);
+  }
+
+  async getSquadProgressInternal(auctionId: string, auctionTeamId: string) {
+    const acquisitions = await this.repo.getAcquisitionsByAuctionTeam(auctionTeamId);
+    const rules = await this.getSquadRules(auctionId);
+    const progress: any[] = [];
+
+    for (const rule of rules) {
+      let currentCount = 0;
+      let description = '';
+      let satisfied = false;
+
+      switch (rule.type) {
+        case 'SQUAD_SIZE':
+          currentCount = acquisitions.length;
+          description = `Squad Size (Min: ${rule.minCount}, Max: ${rule.maxCount})`;
+          satisfied =
+            (!rule.minCount || currentCount >= rule.minCount) &&
+            (!rule.maxCount || currentCount <= rule.maxCount);
+          break;
+        case 'ROLE_COUNT':
+          currentCount = acquisitions.filter((a: any) => a.player?.role === rule.role).length;
+          description = `${rule.role}s (Min: ${rule.minCount}, Max: ${rule.maxCount})`;
+          satisfied =
+            (!rule.minCount || currentCount >= rule.minCount) &&
+            (!rule.maxCount || currentCount <= rule.maxCount);
+          break;
+        case 'DOMESTIC_COUNT':
+          currentCount = acquisitions.filter((a: any) => a.player?.countryCode === 'PK').length;
+          description = `Domestic Players (Min: ${rule.minCount}, Max: ${rule.maxCount})`;
+          satisfied =
+            (!rule.minCount || currentCount >= rule.minCount) &&
+            (!rule.maxCount || currentCount <= rule.maxCount);
+          break;
+        case 'OVERSEAS_COUNT':
+          currentCount = acquisitions.filter((a: any) => a.player?.countryCode !== 'PK').length;
+          description = `Overseas Players (Min: ${rule.minCount}, Max: ${rule.maxCount})`;
+          satisfied =
+            (!rule.minCount || currentCount >= rule.minCount) &&
+            (!rule.maxCount || currentCount <= rule.maxCount);
+          break;
+        case 'CATEGORY_COUNT':
+          currentCount = acquisitions.filter((a: any) => a.player?.categoryId === rule.categoryId).length;
+          description = `${rule.category?.name} Players (Min: ${rule.minCount}, Max: ${rule.maxCount})`;
+          satisfied =
+            (!rule.minCount || currentCount >= rule.minCount) &&
+            (!rule.maxCount || currentCount <= rule.maxCount);
+          break;
+      }
+
+      progress.push({
+        id: rule.id,
+        type: rule.type,
+        description,
+        currentCount,
+        minCount: rule.minCount ?? undefined,
+        maxCount: rule.maxCount ?? undefined,
+        satisfied,
+      });
+    }
+
+    return progress;
+  }
+
+  /**
+   * Get latest squad validation record
+   */
+  async getLatestSquadValidation(auctionId: string, auctionTeamId: string) {
+    return this.repo.getLatestSquadValidation(auctionId, auctionTeamId);
+  }
+
+  /**
+   * Validate squad requirements (called at settlement)
+   */
+  async validateSquadRequirements(auctionId: string, auctionTeamId: string) {
+    const progress = await this.getSquadProgressInternal(auctionId, auctionTeamId);
+    const violations: any[] = [];
+
+    for (const rule of progress) {
+      if (!rule.satisfied) {
+        const violationType =
+          rule.minCount && rule.currentCount < rule.minCount
+            ? 'BELOW_MIN'
+            : rule.maxCount && rule.currentCount > rule.maxCount
+            ? 'ABOVE_MAX'
+            : 'MISSING_REQUIREMENT';
+
+        violations.push({
+          ruleId: rule.id,
+          type: rule.type,
+          violationType,
+          currentCount: rule.currentCount,
+          requiredMinCount: rule.minCount,
+          requiredMaxCount: rule.maxCount,
+        });
+      }
+    }
+
+    const valid = violations.length === 0;
+
+    // Record validation and violations in audit trail
+    const validation = await this.repo.recordSquadValidation({
+      auctionId,
+      auctionTeamId,
+      valid,
+    });
+
+    // Record each violation
+    const rules = await this.getSquadRules(auctionId);
+    for (const violation of violations) {
+      const rule = rules.find((r) => r.id === violation.ruleId);
+      if (rule) {
+        await this.repo.recordSquadViolation({
+          squadValidationId: validation.id,
+          auctionTeamId,
+          squadRuleId: rule.id,
+          violationType: violation.violationType,
+          currentCount: violation.currentCount,
+          requiredMinCount: violation.requiredMinCount,
+          requiredMaxCount: violation.requiredMaxCount,
+        });
+      }
+    }
+
+    await this.eventStore.recordEvent(auctionId, 'squad:validation-complete', {
+      auctionTeamId,
+      valid,
+      violationCount: violations.length,
+    });
+
+    return {
+      valid,
+      progress,
+      violations,
+    };
+  }
 }

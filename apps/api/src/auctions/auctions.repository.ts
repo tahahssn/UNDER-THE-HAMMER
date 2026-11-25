@@ -155,6 +155,52 @@ export class AuctionsRepository {
     return this.prisma.auctionBreak.create({ data });
   }
 
+  async getActiveBreak(auctionId: string) {
+    return this.prisma.auctionBreak.findFirst({
+      where: { auctionId, endedAt: null },
+      orderBy: { startedAt: 'desc' },
+    });
+  }
+
+  async getBreakById(breakId: string) {
+    return this.prisma.auctionBreak.findUnique({
+      where: { id: breakId },
+    });
+  }
+
+  async updateBreak(breakId: string, data: any) {
+    return this.prisma.auctionBreak.update({
+      where: { id: breakId },
+      data,
+    });
+  }
+
+  async recordSquadViolation(data: any) {
+    return this.prisma.squadViolation.create({ data });
+  }
+
+  async getSquadViolations(auctionTeamId: string) {
+    return this.prisma.squadViolation.findMany({
+      where: { auctionTeamId },
+      include: { squadRule: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async recordSquadValidation(data: any) {
+    return this.prisma.squadValidation.create({ data });
+  }
+
+  async getLatestSquadValidation(auctionId: string, auctionTeamId: string) {
+    return this.prisma.squadValidation.findFirst({
+      where: { auctionId, auctionTeamId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        violations: { include: { squadRule: true } },
+      },
+    });
+  }
+
   async recordConnection(data: any) {
     return this.prisma.auctionParticipantConnection.create({ data });
   }

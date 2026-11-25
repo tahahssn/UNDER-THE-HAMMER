@@ -14,6 +14,7 @@ import { AuctionEventStoreService } from './services/auction-event-store.service
 import { AuctionSnapshotService } from './services/auction-snapshot.service';
 import { BreakManagerService } from './services/break-manager.service';
 import { SquadValidatorService } from './services/squad-validator.service';
+import { SquadsService } from './services/squads.service';
 import { CountdownService } from './services/countdown.service';
 import { TurnBasedEngineService } from './services/turn-based-engine.service';
 import { AuctionRoomGateway } from './gateways/auction-room.gateway';
@@ -37,6 +38,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     AuctionSnapshotService,
     BreakManagerService,
     SquadValidatorService,
+    SquadsService,
     CountdownService,
     TurnBasedEngineService,
     AuctionRoomGateway,

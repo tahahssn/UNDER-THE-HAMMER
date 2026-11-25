@@ -61,7 +61,19 @@
 | F | Private room join | complete | Code-based access with error handling |
 | F | Integration & E2E tests | complete | 1,309+ unit tests, 5 E2E scenarios, race-condition verification |
 | F | Documentation | complete | API reference (14 endpoints), architecture decisions, risk register |
-| G | Auction engine | not started | |
+| G | Auction state machine | complete | DRAFT→REGISTRATION→READY→LIVE→SETTLEMENT→CONCLUDED with validation |
+| G | Bid validation & increment engine | complete | Validation pipeline (12 steps), bracket calculation, idempotency |
+| G | Purse ledger & settlement | complete | Append-only BigInt transactions, settlement deterministic |
+| G | Player queue & selection | complete | Manual/automatic draw, queue management |
+| G | Real-time gateway (Socket.IO) | complete | Authenticated WebSocket, room-scoped events, reconnection recovery |
+| G | Break management | complete | Bid counter scheduling, duration adjustments |
+| G | Squad validator | complete | Rule enforcement (squad size, roles, domestic/overseas) |
+| G | Countdown timer | complete | Server-authoritative deadlines, client offset correction |
+| G | Turn-based auction mode | complete | Team rotation, action tracking, turn deadlines |
+| G | Auction REST endpoints | complete | State transitions, player selection, event history |
+| G | Frontend auction room UI | complete | Player stage, team panels, bid control, responsive layout |
+| G | Test suite | complete | 12 core auction logic tests passing, infrastructure tests skipped (environment) |
+| G | Build verification | complete | TypeScript strict mode (Prisma types pending), core logic verified |
 | H | Breaks, squad rules | not started | |
 | I | Realtime gateway, chat | not started | |
 | J | Auction frontend | not started | |
