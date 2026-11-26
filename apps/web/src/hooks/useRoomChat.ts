@@ -59,7 +59,15 @@ export function useRoomChat(roomId: string): RoomChatState {
         authorRole: payload.authorRole,
       };
 
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) => {
+        // Replace pending optimistic message with server version
+        const hasPendingEntry = prev.some((m) => m.messageId.startsWith('pending-'));
+        if (hasPendingEntry) {
+          return prev.map((m) => (m.messageId.startsWith('pending-') ? message : m));
+        }
+        // If no pending entry, just append
+        return [...prev, message];
+      });
 
       // Scroll to latest message
       if (typeof window !== 'undefined') {

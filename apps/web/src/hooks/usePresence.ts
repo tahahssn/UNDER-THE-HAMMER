@@ -56,6 +56,9 @@ export function usePresence(roomId: string): PresenceState {
     const handlePresence = (payload: any) => {
       if (payload.participants) {
         setParticipants(payload.participants);
+        if (payload.activeBidderId) {
+          setActiveBidderId(payload.activeBidderId);
+        }
         setIsLoading(false);
         setError(null);
       }
