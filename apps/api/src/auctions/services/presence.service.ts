@@ -24,6 +24,14 @@ export interface RecordPresenceInput {
  * - Maintains in-memory participant list per room
  * - Isolates room visibility: users only see participants from their room
  * - Used by PresenceGateway to broadcast updates
+ * 
+ * CONSTRAINTS & RECOVERY:
+ * - In-memory presence is volatile: data loss occurs on service restart
+ * - For high-availability deployments, consider persisting to Redis
+ * - Recovery on startup attempts to restore from AuctionParticipantConnection
+ *   but may have incomplete role/teamId data (not stored in that table)
+ * - Rate limiting in ChatGateway is also in-memory only and resets on restart
+ * - For distributed deployments, implement Redis-backed rate limiting
  */
 @Injectable()
 export class PresenceService {
@@ -182,22 +190,56 @@ export class PresenceService {
 
   /**
    * Recover presence from database on service startup
-   * Useful if service crashes and restarts
+   * Attempts to restore in-memory state from AuctionParticipantConnection records
+   * 
+   * LIMITATION: role and teamId must be fetched from RoomMember table, as
+   * AuctionParticipantConnection does not store these fields. This is a TODO
+   * for future optimization.
    */
   async recoverRoomPresence(roomId: string): Promise<void> {
-    const connections = await this.prisma.auctionParticipantConnection.findMany({
-      where: {
-        roomId,
-        disconnectedAt: null,
-      },
-    });
+    try {
+      const connections = await this.prisma.auctionParticipantConnection.findMany({
+        where: {
+          roomId,
+          disconnectedAt: null,
+        },
+        include: {
+          user: true,
+        },
+      });
 
-    if (!this.roomParticipants.has(roomId)) {
-      this.roomParticipants.set(roomId, new Map());
+      if (!this.roomParticipants.has(roomId)) {
+        this.roomParticipants.set(roomId, new Map());
+      }
+
+      const roomMap = this.roomParticipants.get(roomId)!;
+
+      // Restore participants from database
+      for (const conn of connections) {
+        // Attempt to fetch role and teamId from RoomMember
+        const member = await this.prisma.roomMember.findUnique({
+          where: {
+            roomId_userId: {
+              roomId,
+              userId: conn.userId,
+            },
+          },
+        });
+
+        const participant: Participant = {
+          userId: conn.userId,
+          roomId,
+          role: (member?.role as any) || 'SPECTATOR', // Fallback to SPECTATOR if not found
+          teamId: member?.teamId || undefined,
+          joinedAt: conn.connectedAt,
+          connectionState: 'connected',
+        };
+
+        roomMap.set(conn.userId, participant);
+      }
+    } catch (error) {
+      console.error(`Error recovering presence for room ${roomId}:`, error);
+      // Continue without recovery rather than failing startup
     }
-
-    // Note: We don't have role/teamId in AuctionParticipantConnection model
-    // This would need to be fetched from RoomMember table instead
-    // For now, this is a placeholder for the recovery mechanism
   }
 }

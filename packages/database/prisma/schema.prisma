@@ -1323,6 +1323,7 @@ enum ChatMessageKind {
 
 enum ChatMessageStatus {
   VISIBLE
+  HELD
   REMOVED
 }
 

@@ -6,7 +6,7 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuctionsRepository } from '../auctions.repository';
 import { BreakManagerService } from '../services/break-manager.service';
@@ -48,6 +48,13 @@ export class BreakGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       const payload = this.jwtService.verify(token);
+      
+      // === VALIDATION: JWT sub claim must exist and be non-empty ===
+      if (!payload.sub || typeof payload.sub !== 'string' || payload.sub.trim() === '') {
+        client.disconnect();
+        return;
+      }
+      
       client.data.userId = payload.sub;
     } catch (error) {
       client.disconnect();
@@ -96,11 +103,24 @@ export class BreakGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Validate break parameters
       const config = auction.configSnapshot;
-      if (durationSeconds < (config?.breakMinSeconds ?? 60)) {
+      
+      // === VALIDATION: Config must exist and be properly initialized ===
+      if (!config) {
+        client.emit('break:start:error', { 
+          code: 'INVALID_AUCTION_CONFIG',
+          message: 'Auction configuration not initialized'
+        });
+        return;
+      }
+
+      const minSeconds = config.breakMinSeconds ?? 60;
+      const maxSeconds = config.breakMaxSeconds ?? 300;
+
+      if (durationSeconds < minSeconds) {
         client.emit('break:start:error', { code: 'DURATION_TOO_SHORT' });
         return;
       }
-      if (durationSeconds > (config?.breakMaxSeconds ?? 300)) {
+      if (durationSeconds > maxSeconds) {
         client.emit('break:start:error', { code: 'DURATION_TOO_LONG' });
         return;
       }
@@ -169,7 +189,17 @@ export class BreakGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Apply adjustment with server-side validation
       const config = auction.configSnapshot;
-      const maxAdjustment = config?.breakMaxSeconds ?? 300;
+      
+      // === VALIDATION: Config must exist ===
+      if (!config) {
+        client.emit('break:adjust:error', { 
+          code: 'INVALID_AUCTION_CONFIG',
+          message: 'Auction configuration not initialized'
+        });
+        return;
+      }
+
+      const maxAdjustment = config.breakMaxSeconds ?? 300;
 
       let updatedBreak;
       if (adjustmentSeconds > 0) {

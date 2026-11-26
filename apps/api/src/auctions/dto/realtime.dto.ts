@@ -143,7 +143,7 @@ export type BreakStartRequest = z.infer<typeof BreakStartRequestSchema>;
 
 export const BreakAdjustRequestSchema = z.object({
   auctionId: z.string().uuid(),
-  adjustmentSeconds: z.number().int().nonzero(),
+  adjustmentSeconds: z.number().int().refine(n => n !== 0, { message: "Adjustment must be non-zero" }),
 });
 
 export type BreakAdjustRequest = z.infer<typeof BreakAdjustRequestSchema>;

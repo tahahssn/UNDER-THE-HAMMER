@@ -12,6 +12,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RoomsRepository } from '../../rooms/rooms.repository';
 import { RoomChatService } from '../services/room-chat.service';
 import { AuctionEventBroadcasterService } from '../services/auction-event-broadcaster.service';
+import { CreateChatMessageDtoSchema } from '../dto/realtime.dto';
 
 /**
  * Chat Gateway: Manages real-time room chat with moderation support.
@@ -21,6 +22,12 @@ import { AuctionEventBroadcasterService } from '../services/auction-event-broadc
  * - Supports moderation: host can mute/unmute users
  * - Messages can be held for moderation review (visible only to moderators and sender)
  * - No client-selected channels; room determined server-side from JWT + membership
+ * 
+ * CONSTRAINTS & RECOVERY:
+ * - Rate limiting (10 messages/min per user/room) is in-memory only
+ * - On service restart, all rate limit windows are discarded
+ * - For high-availability deployments, use Redis-backed rate limiting
+ * - In-memory rate limit Map: messageRateLimits
  */
 @WebSocketGateway({
   namespace: '/auctions',
@@ -53,6 +60,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       const payload = this.jwtService.verify(token);
+      
+      // === VALIDATION: JWT sub claim must exist and be non-empty ===
+      if (!payload.sub || typeof payload.sub !== 'string' || payload.sub.trim() === '') {
+        client.disconnect();
+        return;
+      }
+      
       client.data.userId = payload.sub;
     } catch (error) {
       client.disconnect();
@@ -70,16 +84,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('chat:send')
   async handleChatSend(
     client: Socket,
-    data: {
-      roomId: string;
-      message: string;
-    }
+    data: any
   ) {
     try {
       const userId = client.data.userId;
-      const { roomId, message } = data;
 
-      // === VALIDATION ===
+      // === ZOD VALIDATION ===
+      const validationResult = CreateChatMessageDtoSchema.safeParse(data);
+      if (!validationResult.success) {
+        client.emit('chat:send:error', { code: 'INVALID_REQUEST', details: validationResult.error.errors });
+        return;
+      }
+
+      const { roomId, message } = validationResult.data;
+
+      // === AUTHORIZATION ===
 
       // 1. Verify user is authenticated
       if (!userId) {
@@ -135,29 +154,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.messageRateLimits.set(rateLimitKey, { count: 1, resetTime: now + 60000 });
       }
 
-      // 5. Validate message length ≤ 500 chars
-      const trimmedMessage = message.trim();
-      if (trimmedMessage.length === 0 || trimmedMessage.length > 500) {
-        client.emit('chat:send:error', { code: 'INVALID_MESSAGE_LENGTH' });
-        return;
-      }
-
       // === SAVE MESSAGE ===
       const savedMessage = await this.chatService.createMessage({
         roomId,
         authorId: userId,
-        body: trimmedMessage,
-        // Content filtering could be applied here to set isModerationHeld
-        isModerationHeld: false,
+        body: message,
       });
 
       // === BROADCAST ===
       this.broadcastChatMessage(roomId, {
         messageId: savedMessage.id,
         from: userId,
-        message: trimmedMessage,
+        message: message,
         timestamp: savedMessage.createdAt,
-        isModerationHeld: savedMessage.isModerationHeld,
+        // Map status to isModerationHeld: only show as held if status indicates it
+        isModerationHeld: savedMessage.status === 'HELD',
         // Include author display info for UI
         authorRole: member.role,
       });
@@ -284,14 +295,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('chat:request-history')
   async handleChatHistoryRequest(
     client: Socket,
-    data: {
-      roomId: string;
-      limit?: number;
-    }
+    data: any
   ) {
     try {
       const userId = client.data.userId;
-      const { roomId, limit = 50 } = data;
+
+      // === ZOD VALIDATION ===
+      const { ChatHistoryRequestSchema } = await import('../dto/realtime.dto');
+      const validationResult = ChatHistoryRequestSchema.safeParse(data);
+      if (!validationResult.success) {
+        client.emit('chat:history:error', { code: 'INVALID_REQUEST' });
+        return;
+      }
+
+      const { roomId, limit = 50 } = validationResult.data;
 
       // Verify room membership
       const member = await this.roomsRepo.getRoomMember(roomId, userId);
@@ -310,7 +327,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const isHost = await this.roomsRepo.getRoomById(roomId).then(r => r?.hostId === userId);
       const filteredMessages = messages
         .filter(msg => {
-          if (msg.isModerationHeld && !isHost && msg.authorId !== userId) {
+          if (msg.status === 'HELD' && !isHost && msg.authorId !== userId) {
             return false; // Hide from non-moderators and non-authors
           }
           return true;
@@ -320,7 +337,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           from: msg.authorId,
           message: msg.body,
           timestamp: msg.createdAt,
-          isModerationHeld: msg.isModerationHeld,
+          isModerationHeld: msg.status === 'HELD',
         }));
 
       client.emit('chat:history', { messages: filteredMessages });

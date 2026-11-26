@@ -12,6 +12,7 @@ import { AuctionsRepository } from '../auctions.repository';
 import { RoomsRepository } from '../../rooms/rooms.repository';
 import { PresenceService } from '../services/presence.service';
 import { AuctionEventBroadcasterService } from '../services/auction-event-broadcaster.service';
+import { PresenceRequestSchema } from '../dto/realtime.dto';
 
 /**
  * Presence Gateway: Tracks and broadcasts room participant presence.
@@ -49,6 +50,13 @@ export class PresenceGateway implements OnGatewayConnection, OnGatewayDisconnect
       }
 
       const payload = this.jwtService.verify(token);
+      
+      // === VALIDATION: JWT sub claim must exist and be non-empty ===
+      if (!payload.sub || typeof payload.sub !== 'string' || payload.sub.trim() === '') {
+        client.disconnect();
+        return;
+      }
+      
       client.data.userId = payload.sub;
       client.data.socketId = client.id;
     } catch (error) {
@@ -178,11 +186,19 @@ export class PresenceGateway implements OnGatewayConnection, OnGatewayDisconnect
   @SubscribeMessage('room:request-presence')
   async handlePresenceRequest(
     client: Socket,
-    data: { roomId: string; includeEvents?: boolean; eventCount?: number }
+    data: any
   ) {
     try {
       const userId = client.data.userId;
-      const { roomId, includeEvents = false, eventCount = 10 } = data;
+
+      // === ZOD VALIDATION ===
+      const validationResult = PresenceRequestSchema.safeParse(data);
+      if (!validationResult.success) {
+        client.emit('room:presence:error', { code: 'INVALID_REQUEST' });
+        return;
+      }
+
+      const { roomId, includeEvents = false, eventCount = 10 } = validationResult.data;
 
       // Verify room membership
       const member = await this.roomsRepo.getRoomMember(roomId, userId);

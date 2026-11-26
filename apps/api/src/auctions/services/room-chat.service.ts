@@ -6,7 +6,7 @@ export interface CreateChatMessageInput {
   roomId: string;
   authorId: string;
   body: string;
-  isModerationHeld?: boolean;
+  status?: 'VISIBLE' | 'HELD' | 'REMOVED';
 }
 
 export interface ChatMessage {
@@ -14,7 +14,7 @@ export interface ChatMessage {
   roomId: string;
   authorId: string | null;
   body: string;
-  isModerationHeld: boolean;
+  status: 'VISIBLE' | 'HELD' | 'REMOVED';
   createdAt: Date;
   removedAt: Date | null;
 }
@@ -38,7 +38,7 @@ export class RoomChatService {
    * Returns the saved message
    */
   async createMessage(input: CreateChatMessageInput): Promise<ChatMessage> {
-    const { roomId, authorId, body, isModerationHeld = false } = input;
+    const { roomId, authorId, body, status = 'VISIBLE' } = input;
 
     // Verify room exists
     const room = await this.roomsRepo.getRoomById(roomId);
@@ -53,13 +53,10 @@ export class RoomChatService {
         authorId,
         kind: 'USER',
         body,
-        status: 'VISIBLE',
+        status,
         createdAt: new Date(),
       },
     });
-
-    // If message is held for moderation, it's tracked but not broadcast normally
-    // A moderator must explicitly approve it
 
     return this.mapToChatMessage(message);
   }
@@ -233,7 +230,7 @@ export class RoomChatService {
       roomId: message.roomId,
       authorId: message.authorId,
       body: message.body,
-      isModerationHeld: false, // Current schema doesn't track this; could add column
+      status: message.status as 'VISIBLE' | 'HELD' | 'REMOVED',
       createdAt: message.createdAt,
       removedAt: message.removedAt,
     };
