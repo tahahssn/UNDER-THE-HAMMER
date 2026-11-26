@@ -99,6 +99,101 @@ under-the-hammer/
 └── README.md
 ```
 
+## Socket.IO Real-Time Architecture
+
+### Gateways
+
+The backend provides three WebSocket gateways under the `/auctions` namespace for real-time room updates:
+
+#### BreakGateway
+Manages break state transitions with server-authoritative validation.
+
+**Commands** (host-only):
+- `break:start` — Start a break with duration in seconds
+- `break:adjust` — Extend/reduce break duration
+- `break:resume` — Resume auction after break
+
+**Events** (read-only broadcast):
+- `break:started` — Break has begun
+- `break:updated` — Break duration adjusted
+- `break:ended` — Break concluded
+
+#### ChatGateway
+Manages real-time room chat with moderation and rate limiting.
+
+**Commands**:
+- `chat:send` — Send a message (10 messages per 60 seconds)
+- `chat:request-history` — Get message history (limit: 50 most recent)
+
+**Events**:
+- `chat:message` — Incoming message broadcast
+- `chat:history` — History response with moderation status
+
+**Moderation** (host-only):
+- `chat:mute-user` — Mute a user in the room
+- `chat:unmute-user` — Unmute a user
+
+#### PresenceGateway
+Tracks and broadcasts room participant presence.
+
+**Commands**:
+- `room:join` — Participant joins room
+- `room:leave` — Participant leaves room
+- `room:request-presence` — Get current participant list
+
+**Events**:
+- `room:presence` — Current participant list (on join or reconnect)
+- `room:presence:update` — Individual participant connection state change
+
+### Room Isolation
+
+All Socket.IO channels are **room-scoped** and **server-determined**:
+- Break events use `auction:{auctionId}` channel
+- Chat messages broadcast to `room:{roomId}` channel
+- Presence updates broadcast to `room:{roomId}` channel
+- Clients cannot select arbitrary channels; membership is validated server-side
+
+### Authentication
+
+All socket connections require JWT Bearer token in handshake:
+```javascript
+const socket = io(url, {
+  auth: {
+    token: jwtToken // Required; connection refused without valid token
+  }
+});
+```
+
+Invalid tokens disconnect immediately. The server extracts the authenticated user ID from the JWT `sub` claim.
+
+### Error Handling
+
+Standard error response format:
+```typescript
+{
+  code: 'ERROR_CODE',
+  message?: 'Human-readable error message'
+}
+```
+
+Common codes: `UNAUTHORIZED`, `NOT_ROOM_MEMBER`, `RATE_LIMITED`, `USER_MUTED`, `INVALID_AUCTION_CONFIG`
+
+### Testing
+
+Integration tests are provided in `apps/api/src/auctions/gateways/__tests__/`:
+- `break.gateway.spec.ts` — Break command authorization and event broadcasting
+- `chat.gateway.spec.ts` — Chat message persistence, rate limiting, moderation
+- `presence.gateway.spec.ts` — Presence tracking, room isolation
+
+Frontend hook tests in `apps/web/src/hooks/__tests__/`:
+- `useRoomSocket.spec.ts` — Socket join/leave lifecycle, reconnection recovery
+- `useRoomChat.spec.ts` — Message sending, optimistic UI, deduplication
+- `usePresence.spec.ts` — Presence updates, active bidder tracking
+
+Run tests: `npm run test` in `apps/api/` or `apps/web/`
+
+---
+
 ## Documentation
 
 | File | Purpose |
