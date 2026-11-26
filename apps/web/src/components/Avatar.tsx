@@ -5,6 +5,7 @@ export interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {
   src?: string;
   alt?: string;
   initials?: string;
+  userId?: string;
   size?: 'sm' | 'md' | 'lg';
 }
 
@@ -15,8 +16,11 @@ const sizeClasses = {
 };
 
 export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
-  ({ className = '', src, alt = 'Avatar', initials, size = 'md', ...props }, ref) => {
+  ({ className = '', src, alt = 'Avatar', initials, userId, size = 'md', ...props }, ref) => {
     const sizeClass = sizeClasses[size];
+    
+    // Generate initials from userId if not provided
+    const displayInitials = initials || (userId ? userId.slice(0, 2).toUpperCase() : undefined);
 
     return (
       <div
@@ -26,8 +30,8 @@ export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
       >
         {src ? (
           <Image src={src} alt={alt} fill className="object-cover" />
-        ) : initials ? (
-          <span className="text-text font-semibold">{initials}</span>
+        ) : displayInitials ? (
+          <span className="text-text font-semibold">{displayInitials}</span>
         ) : (
           <span className="text-text-muted">-</span>
         )}
