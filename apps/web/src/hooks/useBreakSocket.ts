@@ -2,6 +2,12 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useSocket } from './useSocket';
+import {
+  BreakStartedPayload,
+  BreakAdjustedPayload,
+  BreakEndedPayload,
+  isBreakStartedPayload,
+} from '@/lib/socket-events';
 
 export interface BreakStatus {
   id: string;
@@ -14,9 +20,13 @@ export interface BreakStatus {
 }
 
 /**
- * Hook to subscribe to break-related Socket.IO events.
- * Handles: break:started, break:extended, break:reduced, break:ended
+ * useBreakSocket: Hook to subscribe to break-related Socket.IO events.
+ * Handles: break:started, break:adjusted (extended/reduced), break:ended
  * Provides methods to trigger host actions and track break state.
+ * Type-safe event handling with payload validation.
+ *
+ * @param auctionId - Auction ID for event subscription
+ * @returns Break state and host control methods
  */
 export const useBreakSocket = (auctionId: string) => {
   const socket = useSocket();
@@ -28,22 +38,34 @@ export const useBreakSocket = (auctionId: string) => {
     if (!socket) return;
 
     // Break started
-    socket.on(`auction:${auctionId}:break:started`, (data: any) => {
+    const handleBreakStarted = (payload: unknown) => {
+      if (!isBreakStartedPayload(payload)) {
+        console.error('Invalid break:started payload:', payload);
+        return;
+      }
+
+      const data = payload as BreakStartedPayload;
       const status: BreakStatus = {
         id: data.breakId,
         startedAt: new Date(data.startedAt),
         deadline: new Date(data.deadline),
-        secondsRemaining: data.secondsRemaining,
-        originalDurationSeconds: data.originalDurationSeconds,
+        secondsRemaining: data.durationSeconds,
+        originalDurationSeconds: data.durationSeconds,
         reason: data.reason,
         isExpired: false,
       };
       setBreakStatus(status);
       setIsBreakActive(true);
-    });
+    };
 
-    // Break extended
-    socket.on(`auction:${auctionId}:break:extended`, (data: any) => {
+    // Break adjusted (extended or reduced)
+    const handleBreakAdjusted = (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') {
+        console.error('Invalid break:adjusted payload:', payload);
+        return;
+      }
+
+      const data = payload as BreakAdjustedPayload;
       setBreakStatus((prev) =>
         prev
           ? {
@@ -52,43 +74,40 @@ export const useBreakSocket = (auctionId: string) => {
             }
           : null
       );
-    });
-
-    // Break reduced
-    socket.on(`auction:${auctionId}:break:reduced`, (data: any) => {
-      setBreakStatus((prev) =>
-        prev
-          ? {
-              ...prev,
-              deadline: new Date(data.newDeadline),
-            }
-          : null
-      );
-    });
+    };
 
     // Break ended
-    socket.on(`auction:${auctionId}:break:ended`, (data: any) => {
+    const handleBreakEnded = (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') {
+        console.error('Invalid break:ended payload:', payload);
+        return;
+      }
+
+      const data = payload as BreakEndedPayload;
       setBreakStatus(null);
       setIsBreakActive(false);
-    });
+    };
+
+    socket.on(`auction:${auctionId}:break:started`, handleBreakStarted);
+    socket.on(`auction:${auctionId}:break:adjusted`, handleBreakAdjusted);
+    socket.on(`auction:${auctionId}:break:ended`, handleBreakEnded);
 
     return () => {
-      socket.off(`auction:${auctionId}:break:started`);
-      socket.off(`auction:${auctionId}:break:extended`);
-      socket.off(`auction:${auctionId}:break:reduced`);
-      socket.off(`auction:${auctionId}:break:ended`);
+      socket.off(`auction:${auctionId}:break:started`, handleBreakStarted);
+      socket.off(`auction:${auctionId}:break:adjusted`, handleBreakAdjusted);
+      socket.off(`auction:${auctionId}:break:ended`, handleBreakEnded);
     };
   }, [socket, auctionId]);
 
-  // Host actions
+  // Host actions (type-safe)
   const extendBreak = useCallback(
     async (extensionSeconds: number) => {
       if (!socket) throw new Error('Socket not connected');
       return new Promise((resolve, reject) => {
         socket.emit(
           'break:extend',
-          { auctionId, extensionSeconds },
-          (err: any, result: any) => {
+          { auctionId, additionalSeconds: extensionSeconds },
+          (err: unknown, result: unknown) => {
             if (err) reject(err);
             else resolve(result);
           }
@@ -104,8 +123,8 @@ export const useBreakSocket = (auctionId: string) => {
       return new Promise((resolve, reject) => {
         socket.emit(
           'break:reduce',
-          { auctionId, reductionSeconds },
-          (err: any, result: any) => {
+          { auctionId, reduceBySeconds: reductionSeconds },
+          (err: unknown, result: unknown) => {
             if (err) reject(err);
             else resolve(result);
           }
@@ -118,7 +137,7 @@ export const useBreakSocket = (auctionId: string) => {
   const endBreak = useCallback(async () => {
     if (!socket) throw new Error('Socket not connected');
     return new Promise((resolve, reject) => {
-      socket.emit('break:end', { auctionId }, (err: any, result: any) => {
+      socket.emit('break:end', { auctionId }, (err: unknown, result: unknown) => {
         if (err) reject(err);
         else resolve(result);
       });

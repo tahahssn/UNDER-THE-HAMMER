@@ -2,14 +2,24 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useSocket } from './useSocket';
+import {
+  RoomPresencePayload,
+  PresenceUpdatePayload,
+  PresenceHeartbeatRequest,
+  isPresenceParticipant,
+  PresenceParticipant,
+} from '@/lib/socket-events';
 
 export interface Participant {
   userId: string;
+  userName: string;
   role: 'HOST' | 'TEAM_OWNER' | 'SPECTATOR';
   teamId?: string;
+  teamName?: string;
   joinedAt: string;
   connectionState: 'connected' | 'reconnecting' | 'disconnected';
   isYou?: boolean;
+  isOnline: boolean;
 }
 
 export interface PresenceState {
@@ -21,13 +31,14 @@ export interface PresenceState {
 
 /**
  * usePresence: Tracks and displays room participant presence
- * 
+ *
  * Features:
- * - Listens to room:presence events from server
- * - On reconnect: fetches current presence snapshot
+ * - Listens to room:presence events from server (type-safe)
+ * - On reconnect: fetches current presence snapshot from server
  * - Shows connection state (connected/reconnecting/disconnected) for each participant
  * - Tracks active bidder during auction
- * 
+ * - Server broadcasts presence updates on participant connect/disconnect
+ *
  * @param roomId - Room ID
  * @returns Presence state with participant list
  */
@@ -53,29 +64,84 @@ export function usePresence(roomId: string): PresenceState {
   useEffect(() => {
     if (!socket || !roomId) return;
 
-    const handlePresence = (payload: any) => {
-      if (payload.participants) {
-        setParticipants(payload.participants);
-        if (payload.activeBidderId) {
-          setActiveBidderId(payload.activeBidderId);
+    const handlePresence = (payload: unknown) => {
+      // Type-safe validation
+      if (!payload || typeof payload !== 'object') {
+        setError('Invalid presence payload');
+        setIsLoading(false);
+        return;
+      }
+
+      const presencePayload = payload as RoomPresencePayload;
+
+      if (presencePayload.participants && Array.isArray(presencePayload.participants)) {
+        // Map server participants to Participant interface
+        const mappedParticipants: Participant[] = presencePayload.participants
+          .filter(isPresenceParticipant)
+          .map((p: PresenceParticipant) => ({
+            userId: p.userId,
+            userName: p.userName,
+            role: p.role,
+            teamId: p.teamId,
+            teamName: p.teamName,
+            joinedAt: p.connectedAt,
+            connectionState: p.isOnline ? 'connected' : 'disconnected',
+            isOnline: p.isOnline,
+          }));
+
+        setParticipants(mappedParticipants);
+
+        if (presencePayload.activeBidderId) {
+          setActiveBidderId(presencePayload.activeBidderId);
         }
+
         setIsLoading(false);
         setError(null);
+      } else {
+        setError('Invalid presence data');
       }
     };
 
-    const handlePresenceError = (payload: any) => {
-      setError(payload.message || 'Failed to fetch presence');
+    const handlePresenceUpdate = (payload: unknown) => {
+      // Handle individual participant updates (broadcast by server)
+      if (!payload || typeof payload !== 'object') {
+        return;
+      }
+
+      const updatePayload = payload as PresenceUpdatePayload;
+
+      setParticipants((prev) => {
+        return prev.map((p) => {
+          if (p.userId === updatePayload.userId) {
+            return {
+              ...p,
+              connectionState: updatePayload.status as any,
+              isOnline: updatePayload.status !== 'disconnected',
+            };
+          }
+          return p;
+        });
+      });
+    };
+
+    const handlePresenceError = (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') {
+        setError('Presence error');
+      } else {
+        const errorPayload = payload as { message?: string };
+        setError(errorPayload.message || 'Failed to fetch presence');
+      }
       setIsLoading(false);
     };
 
     socket.on('room:presence', handlePresence);
+    socket.on('room:presence:update', handlePresenceUpdate);
     socket.on('room:presence:error', handlePresenceError);
 
     // Fetch presence on mount
     fetchPresence();
 
-    // Refetch presence on reconnect
+    // Refetch presence on reconnect to recover server state
     const handleReconnect = () => {
       setIsLoading(true);
       fetchPresence();
@@ -85,12 +151,13 @@ export function usePresence(roomId: string): PresenceState {
 
     return () => {
       socket.off('room:presence', handlePresence);
+      socket.off('room:presence:update', handlePresenceUpdate);
       socket.off('room:presence:error', handlePresenceError);
       socket.off('connect', handleReconnect);
     };
   }, [socket, roomId, fetchPresence]);
 
-  // Update connection state for participants (simulate reconnecting state)
+  // Update local connection state for current user
   useEffect(() => {
     if (!socket) return;
 
@@ -99,6 +166,7 @@ export function usePresence(roomId: string): PresenceState {
         prev.map((p) => ({
           ...p,
           connectionState: p.isYou ? 'disconnected' : p.connectionState,
+          isOnline: p.isYou ? false : p.isOnline,
         }))
       );
     };
@@ -117,6 +185,7 @@ export function usePresence(roomId: string): PresenceState {
         prev.map((p) => ({
           ...p,
           connectionState: p.isYou ? 'connected' : p.connectionState,
+          isOnline: p.isYou ? true : p.isOnline,
         }))
       );
     };

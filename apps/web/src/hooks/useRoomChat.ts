@@ -1,7 +1,15 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSocket } from './useSocket';
+import {
+  ChatMessagePayload,
+  ChatSendRequest,
+  ChatErrorPayload,
+  ChatHistoryPayload,
+  isChatMessagePayload,
+  ChatHistoryRequest,
+} from '@/lib/socket-events';
 
 export interface ChatMessage {
   messageId: string;
@@ -10,6 +18,7 @@ export interface ChatMessage {
   timestamp: Date;
   isModerationHeld?: boolean;
   authorRole?: 'HOST' | 'TEAM_OWNER' | 'SPECTATOR';
+  idempotencyKey?: string; // Track for deduplication
 }
 
 export interface RoomChatState {
@@ -26,14 +35,15 @@ const RATE_LIMIT_COOLDOWN = 60000; // 1 minute for rate limit feedback
 
 /**
  * useRoomChat: Manages room chat messages and UI state
- * 
+ *
  * Features:
- * - Listens to chat:message events from server
+ * - Listens to chat:message events from server (type-safe)
  * - Validates message length before sending
- * - Optimistic UI: show pending message, replace with server version
+ * - Idempotency keys prevent duplicate messages on reconnect
+ * - Replaces optimistic pending message with server version
  * - Rate-limit feedback: show cooldown timer if rate-limited
  * - Scroll to latest message on new message
- * 
+ *
  * @param roomId - Room ID
  * @returns Chat state and control functions
  */
@@ -45,27 +55,50 @@ export function useRoomChat(roomId: string): RoomChatState {
   const [rateLimitRemaining, setRateLimitRemaining] = useState(10);
   const [rateLimitResetTime, setRateLimitResetTime] = useState<number | null>(null);
 
+  // Track sent idempotency keys to handle server echoes and prevent duplicates
+  const sentKeysRef = useRef<Map<string, string>>(new Map());
+
   // Listen for incoming messages
   useEffect(() => {
     if (!socket || !roomId) return;
 
-    const handleChatMessage = (payload: any) => {
+    const handleChatMessage = (payload: unknown) => {
+      // Type-safe validation
+      if (!isChatMessagePayload(payload)) {
+        console.error('Invalid chat message payload:', payload);
+        return;
+      }
+
       const message: ChatMessage = {
         messageId: payload.messageId,
         from: payload.from,
         message: payload.message,
         timestamp: new Date(payload.timestamp),
-        isModerationHeld: payload.isModerationHeld || false,
+        isModerationHeld: payload.isModerationHeld,
         authorRole: payload.authorRole,
       };
 
       setMessages((prev) => {
-        // Replace pending optimistic message with server version
-        const hasPendingEntry = prev.some((m) => m.messageId.startsWith('pending-'));
-        if (hasPendingEntry) {
-          return prev.map((m) => (m.messageId.startsWith('pending-') ? message : m));
+        // Check if this is a server echo of our pending message
+        const isMsgFromUs = Array.from(sentKeysRef.current.values()).includes(message.messageId);
+
+        if (isMsgFromUs) {
+          // Replace pending message (by idempotency key) with server version
+          return prev.map((m) => {
+            if (sentKeysRef.current.has(m.messageId)) {
+              sentKeysRef.current.delete(m.messageId);
+              return message;
+            }
+            return m;
+          });
         }
-        // If no pending entry, just append
+
+        // Check if we already have this message (idempotent delivery)
+        if (prev.some((m) => m.messageId === message.messageId)) {
+          return prev; // Already exists, don't duplicate
+        }
+
+        // New message from someone else
         return [...prev, message];
       });
 
@@ -80,8 +113,16 @@ export function useRoomChat(roomId: string): RoomChatState {
       }
     };
 
-    const handleChatError = (payload: any) => {
-      if (payload.code === 'RATE_LIMITED') {
+    const handleChatError = (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') {
+        setError('Unknown chat error');
+        setIsLoading(false);
+        return;
+      }
+
+      const errorPayload = payload as ChatErrorPayload;
+
+      if (errorPayload.code === 'RATE_LIMITED') {
         setError('You are sending messages too quickly. Please wait.');
         setRateLimitRemaining(0);
         setRateLimitResetTime(Date.now() + RATE_LIMIT_COOLDOWN);
@@ -92,28 +133,35 @@ export function useRoomChat(roomId: string): RoomChatState {
           setError(null);
           setRateLimitRemaining(10);
         }, RATE_LIMIT_COOLDOWN);
-      } else if (payload.code === 'USER_MUTED') {
+      } else if (errorPayload.code === 'USER_MUTED') {
         setError('You have been muted in this room.');
       } else {
-        setError(payload.message || 'Failed to send message');
+        setError(errorPayload.message || 'Failed to send message');
       }
       setIsLoading(false);
     };
 
-    socket.on(`chat:message`, handleChatMessage);
-    socket.on(`chat:send:error`, handleChatError);
+    socket.on('chat:message', handleChatMessage);
+    socket.on('chat:send:error', handleChatError);
 
     // Request message history on mount
-    socket.emit('chat:request-history', { roomId, limit: 50 });
+    const historyRequest: ChatHistoryRequest = { roomId, limit: 50 };
+    socket.emit('chat:request-history', historyRequest);
 
-    const handleChatHistory = (payload: any) => {
-      if (payload.messages) {
-        const historyMessages: ChatMessage[] = payload.messages.map((msg: any) => ({
+    const handleChatHistory = (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') {
+        return;
+      }
+
+      const historyPayload = payload as ChatHistoryPayload;
+
+      if (historyPayload.messages && Array.isArray(historyPayload.messages)) {
+        const historyMessages: ChatMessage[] = historyPayload.messages.map((msg) => ({
           messageId: msg.messageId,
           from: msg.from,
           message: msg.message,
           timestamp: new Date(msg.timestamp),
-          isModerationHeld: msg.isModerationHeld || false,
+          isModerationHeld: msg.isModerationHeld,
         }));
         setMessages(historyMessages);
       }
@@ -152,21 +200,31 @@ export function useRoomChat(roomId: string): RoomChatState {
       setIsLoading(true);
       setError(null);
 
+      // Create idempotency key for this message
+      const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+      const pendingMessageId = `pending-${idempotencyKey}`;
+
       // Add optimistic message
       const optimisticMessage: ChatMessage = {
-        messageId: `pending-${Date.now()}`,
+        messageId: pendingMessageId,
         from: 'you', // Will be replaced by server response
         message: trimmed,
         timestamp: new Date(),
+        idempotencyKey,
       };
+
+      // Track this key so we can match it when server echoes back
+      sentKeysRef.current.set(pendingMessageId, pendingMessageId);
 
       setMessages((prev) => [...prev, optimisticMessage]);
 
-      // Emit to server
-      socket.emit('chat:send', {
+      // Emit to server with idempotency key
+      const sendRequest: ChatSendRequest = {
         roomId,
         message: trimmed,
-      });
+        idempotencyKey,
+      };
+      socket.emit('chat:send', sendRequest);
 
       // Note: Server response will trigger handleChatMessage which will replace optimistic message
       setIsLoading(false);
