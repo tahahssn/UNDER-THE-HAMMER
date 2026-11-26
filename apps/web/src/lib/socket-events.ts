@@ -15,6 +15,7 @@ export interface ChatMessagePayload {
   timestamp: string; // ISO 8601
   isModerationHeld: boolean;
   authorRole?: 'HOST' | 'TEAM_OWNER' | 'SPECTATOR';
+  idempotencyKey?: string; // Idempotency key for deduplication; server echoes back
 }
 
 export interface ChatSendRequest {

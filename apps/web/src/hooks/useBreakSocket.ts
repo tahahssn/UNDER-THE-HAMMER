@@ -44,18 +44,22 @@ export const useBreakSocket = (auctionId: string) => {
         return;
       }
 
-      const data = payload as BreakStartedPayload;
-      const status: BreakStatus = {
-        id: data.breakId,
-        startedAt: new Date(data.startedAt),
-        deadline: new Date(data.deadline),
-        secondsRemaining: data.durationSeconds,
-        originalDurationSeconds: data.durationSeconds,
-        reason: data.reason,
-        isExpired: false,
-      };
-      setBreakStatus(status);
-      setIsBreakActive(true);
+      try {
+        const data = payload as BreakStartedPayload;
+        const status: BreakStatus = {
+          id: data.breakId,
+          startedAt: new Date(data.startedAt),
+          deadline: new Date(data.deadline),
+          secondsRemaining: data.durationSeconds,
+          originalDurationSeconds: data.durationSeconds,
+          reason: data.reason,
+          isExpired: false,
+        };
+        setBreakStatus(status);
+        setIsBreakActive(true);
+      } catch (err) {
+        console.error('Error processing break:started:', err);
+      }
     };
 
     // Break adjusted (extended or reduced)
@@ -65,15 +69,26 @@ export const useBreakSocket = (auctionId: string) => {
         return;
       }
 
-      const data = payload as BreakAdjustedPayload;
-      setBreakStatus((prev) =>
-        prev
-          ? {
-              ...prev,
-              deadline: new Date(data.newDeadline),
-            }
-          : null
-      );
+      try {
+        const data = payload as BreakAdjustedPayload;
+
+        // Validate required fields
+        if (!data.newDeadline) {
+          console.error('Missing newDeadline in break:adjusted');
+          return;
+        }
+
+        setBreakStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                deadline: new Date(data.newDeadline),
+              }
+            : null
+        );
+      } catch (err) {
+        console.error('Error processing break:adjusted:', err);
+      }
     };
 
     // Break ended
@@ -83,9 +98,13 @@ export const useBreakSocket = (auctionId: string) => {
         return;
       }
 
-      const data = payload as BreakEndedPayload;
-      setBreakStatus(null);
-      setIsBreakActive(false);
+      try {
+        const data = payload as BreakEndedPayload;
+        setBreakStatus(null);
+        setIsBreakActive(false);
+      } catch (err) {
+        console.error('Error processing break:ended:', err);
+      }
     };
 
     socket.on(`auction:${auctionId}:break:started`, handleBreakStarted);

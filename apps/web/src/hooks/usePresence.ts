@@ -65,16 +65,23 @@ export function usePresence(roomId: string): PresenceState {
     if (!socket || !roomId) return;
 
     const handlePresence = (payload: unknown) => {
-      // Type-safe validation
+      // Type-safe validation using socket-events contract
       if (!payload || typeof payload !== 'object') {
         setError('Invalid presence payload');
         setIsLoading(false);
         return;
       }
 
+      // Validate payload structure
       const presencePayload = payload as RoomPresencePayload;
 
-      if (presencePayload.participants && Array.isArray(presencePayload.participants)) {
+      if (!presencePayload.participants || !Array.isArray(presencePayload.participants)) {
+        setError('Invalid presence data structure');
+        setIsLoading(false);
+        return;
+      }
+
+      try {
         // Map server participants to Participant interface
         const mappedParticipants: Participant[] = presencePayload.participants
           .filter(isPresenceParticipant)
@@ -97,31 +104,42 @@ export function usePresence(roomId: string): PresenceState {
 
         setIsLoading(false);
         setError(null);
-      } else {
-        setError('Invalid presence data');
+      } catch (err) {
+        setError('Failed to process presence data');
+        setIsLoading(false);
       }
     };
 
     const handlePresenceUpdate = (payload: unknown) => {
       // Handle individual participant updates (broadcast by server)
+      // Type-safe validation
       if (!payload || typeof payload !== 'object') {
         return;
       }
 
-      const updatePayload = payload as PresenceUpdatePayload;
+      try {
+        const updatePayload = payload as PresenceUpdatePayload;
 
-      setParticipants((prev) => {
-        return prev.map((p) => {
-          if (p.userId === updatePayload.userId) {
-            return {
-              ...p,
-              connectionState: updatePayload.status as any,
-              isOnline: updatePayload.status !== 'disconnected',
-            };
-          }
-          return p;
+        // Validate required fields
+        if (!updatePayload.userId || !updatePayload.status) {
+          return;
+        }
+
+        setParticipants((prev) => {
+          return prev.map((p) => {
+            if (p.userId === updatePayload.userId) {
+              return {
+                ...p,
+                connectionState: updatePayload.status as 'connected' | 'disconnected' | 'reconnecting',
+                isOnline: updatePayload.status !== 'disconnected',
+              };
+            }
+            return p;
+          });
         });
-      });
+      } catch (err) {
+        console.error('Error processing presence update:', err);
+      }
     };
 
     const handlePresenceError = (payload: unknown) => {

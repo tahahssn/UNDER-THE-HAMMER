@@ -69,28 +69,30 @@ export function useRoomChat(roomId: string): RoomChatState {
         return;
       }
 
+      const chatPayload = payload as ChatMessagePayload;
       const message: ChatMessage = {
-        messageId: payload.messageId,
-        from: payload.from,
-        message: payload.message,
-        timestamp: new Date(payload.timestamp),
-        isModerationHeld: payload.isModerationHeld,
-        authorRole: payload.authorRole,
+        messageId: chatPayload.messageId,
+        from: chatPayload.from,
+        message: chatPayload.message,
+        timestamp: new Date(chatPayload.timestamp),
+        isModerationHeld: chatPayload.isModerationHeld,
+        authorRole: chatPayload.authorRole,
       };
 
       setMessages((prev) => {
-        // Check if this is a server echo of our pending message
-        const isMsgFromUs = Array.from(sentKeysRef.current.values()).includes(message.messageId);
+        // Check if this is a server echo of our pending message by idempotency key
+        let pendingMessageId: string | null = null;
+        for (const [pendingId, idempotencyKey] of sentKeysRef.current.entries()) {
+          if (idempotencyKey === message.idempotencyKey) {
+            pendingMessageId = pendingId;
+            break;
+          }
+        }
 
-        if (isMsgFromUs) {
-          // Replace pending message (by idempotency key) with server version
-          return prev.map((m) => {
-            if (sentKeysRef.current.has(m.messageId)) {
-              sentKeysRef.current.delete(m.messageId);
-              return message;
-            }
-            return m;
-          });
+        if (pendingMessageId) {
+          // Replace pending message with server version
+          sentKeysRef.current.delete(pendingMessageId);
+          return prev.map((m) => (m.messageId === pendingMessageId ? message : m));
         }
 
         // Check if we already have this message (idempotent delivery)
@@ -200,7 +202,8 @@ export function useRoomChat(roomId: string): RoomChatState {
       setIsLoading(true);
       setError(null);
 
-      // Create idempotency key for this message
+      // Create unique idempotency key for this message
+      // Format: timestamp-nonce (server will validate this for deduplication)
       const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
       const pendingMessageId = `pending-${idempotencyKey}`;
 
@@ -213,12 +216,13 @@ export function useRoomChat(roomId: string): RoomChatState {
         idempotencyKey,
       };
 
-      // Track this key so we can match it when server echoes back
-      sentKeysRef.current.set(pendingMessageId, pendingMessageId);
+      // Track pending message: pendingId -> idempotencyKey
+      // When server echoes back with idempotencyKey, we match by that key
+      sentKeysRef.current.set(pendingMessageId, idempotencyKey);
 
       setMessages((prev) => [...prev, optimisticMessage]);
 
-      // Emit to server with idempotency key
+      // Emit to server with idempotency key for server-side deduplication
       const sendRequest: ChatSendRequest = {
         roomId,
         message: trimmed,
@@ -226,7 +230,7 @@ export function useRoomChat(roomId: string): RoomChatState {
       };
       socket.emit('chat:send', sendRequest);
 
-      // Note: Server response will trigger handleChatMessage which will replace optimistic message
+      // Note: Server response will trigger handleChatMessage which matches by idempotencyKey
       setIsLoading(false);
     },
     [socket, roomId]
