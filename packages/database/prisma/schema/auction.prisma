@@ -68,6 +68,7 @@ model Auction {
   teams            AuctionTeam[]
   owners           TeamOwner[]
   squadRules       SquadRule[]
+  squadValidations SquadValidation[]
   events           AuctionEvent[]
   bids             Bid[]
   acquisitions     PlayerAcquisition[]

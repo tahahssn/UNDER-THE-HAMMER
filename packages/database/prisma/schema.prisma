@@ -909,6 +909,7 @@ model Auction {
   teams            AuctionTeam[]
   owners           TeamOwner[]
   squadRules       SquadRule[]
+  squadValidations SquadValidation[]
   events           AuctionEvent[]
   bids             Bid[]
   acquisitions     PlayerAcquisition[]
@@ -1182,6 +1183,8 @@ model AuctionTeam {
   turns        AuctionTurn[]
   leading      AuctionPlayer[]      @relation("LeadingTeam")
   progress     SquadRequirementProgress[]
+  validations  SquadValidation[]
+  violations   SquadViolation[]
 
   @@unique([auctionId, teamId])
   @@unique([auctionId, slotIndex])
@@ -1254,6 +1257,7 @@ model SquadRule {
   auction  Auction         @relation(fields: [auctionId], references: [id], onDelete: Cascade)
   category PlayerCategory? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   progress SquadRequirementProgress[]
+  violations SquadViolation[]
 
   @@index([auctionId])
 }
@@ -1270,6 +1274,42 @@ model SquadRequirementProgress {
   squadRule   SquadRule   @relation(fields: [squadRuleId], references: [id], onDelete: Cascade)
 
   @@unique([auctionTeamId, squadRuleId])
+}
+
+// Validation snapshot: records whether a team's squad was valid at settlement
+model SquadValidation {
+  id            String   @id @default(uuid()) @db.Uuid
+  auctionId     String   @db.Uuid
+  auctionTeamId String   @db.Uuid
+  valid         Boolean
+  createdAt     DateTime @default(now())
+
+  auction     Auction          @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  auctionTeam AuctionTeam      @relation(fields: [auctionTeamId], references: [id], onDelete: Cascade)
+  violations  SquadViolation[]
+
+  @@index([auctionTeamId, createdAt])
+  @@index([auctionId, createdAt])
+}
+
+// Audit trail: individual rule violations (append-only, never deleted)
+model SquadViolation {
+  id              String   @id @default(uuid()) @db.Uuid
+  squadValidationId String @db.Uuid
+  auctionTeamId   String   @db.Uuid
+  squadRuleId     String   @db.Uuid
+  violationType   String   // BELOW_MIN | ABOVE_MAX | UNSATISFIED
+  currentCount    Int
+  requiredMinCount Int?
+  requiredMaxCount Int?
+  createdAt       DateTime @default(now())
+
+  squadValidation SquadValidation @relation(fields: [squadValidationId], references: [id], onDelete: Cascade)
+  auctionTeam     AuctionTeam     @relation(fields: [auctionTeamId], references: [id], onDelete: Cascade)
+  squadRule       SquadRule       @relation(fields: [squadRuleId], references: [id], onDelete: Cascade)
+
+  @@index([auctionTeamId, createdAt])
+  @@index([squadValidationId])
 }
 
 
