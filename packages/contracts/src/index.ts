@@ -13,3 +13,5 @@ export * from "./players.contract";
 export * from "./teams.contract";
 export * from "./subscriptions.contract";
 export * from "./rooms.contract";
+export * from "./realtime.contract";
+

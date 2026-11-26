@@ -17,11 +17,17 @@ import { SquadValidatorService } from './services/squad-validator.service';
 import { SquadsService } from './services/squads.service';
 import { CountdownService } from './services/countdown.service';
 import { TurnBasedEngineService } from './services/turn-based-engine.service';
+import { RoomChatService } from './services/room-chat.service';
+import { PresenceService } from './services/presence.service';
 import { AuctionRoomGateway } from './gateways/auction-room.gateway';
+import { BreakGateway } from './gateways/break.gateway';
+import { ChatGateway } from './gateways/chat.gateway';
+import { PresenceGateway } from './gateways/presence.gateway';
 import { PrismaModule } from '../prisma/prisma.module';
+import { RoomsModule } from '../rooms/rooms.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, RoomsModule],
   controllers: [AuctionsController],
   providers: [
     AuctionsService,
@@ -41,8 +47,13 @@ import { PrismaModule } from '../prisma/prisma.module';
     SquadsService,
     CountdownService,
     TurnBasedEngineService,
+    RoomChatService,
+    PresenceService,
     AuctionRoomGateway,
+    BreakGateway,
+    ChatGateway,
+    PresenceGateway,
   ],
-  exports: [AuctionsService, AuctionEventBroadcasterService],
+  exports: [AuctionsService, AuctionEventBroadcasterService, RoomChatService, PresenceService],
 })
 export class AuctionsModule {}

@@ -2,14 +2,30 @@ import { Injectable, Inject } from '@nestjs/common';
 
 /**
  * Service for broadcasting auction events to room participants via WebSocket
- * Actual Socket.IO emission happens through injected gateway reference
+ * Actual Socket.IO emission happens through injected gateway references
+ * Supports coordination with Break, Chat, and Presence gateways
  */
 @Injectable()
 export class AuctionEventBroadcasterService {
-  private gateway: any; // Will be injected by gateway after initialization
+  private gateway: any; // AuctionRoomGateway - Will be injected by gateway after initialization
+  private breakGateway: any; // BreakGateway
+  private chatGateway: any; // ChatGateway
+  private presenceGateway: any; // PresenceGateway
 
   setGateway(gateway: any) {
     this.gateway = gateway;
+  }
+
+  setBreakGateway(gateway: any) {
+    this.breakGateway = gateway;
+  }
+
+  setChatGateway(gateway: any) {
+    this.chatGateway = gateway;
+  }
+
+  setPresenceGateway(gateway: any) {
+    this.presenceGateway = gateway;
   }
 
   /**
@@ -134,5 +150,39 @@ export class AuctionEventBroadcasterService {
       auctionId,
       timestamp: new Date(),
     };
+  }
+
+  /**
+   * Broadcast break event to room (called from BreakManagerService)
+   * Respects room isolation
+   */
+  broadcastBreakEvent(roomId: string, auctionId: string, eventType: string, payload: any) {
+    if (this.breakGateway) {
+      if (eventType === 'BREAK_STARTED') {
+        this.breakGateway.broadcastBreakStarted(roomId, auctionId, payload);
+      } else if (eventType === 'BREAK_UPDATED') {
+        this.breakGateway.broadcastBreakUpdated(roomId, auctionId, payload);
+      } else if (eventType === 'BREAK_ENDED') {
+        this.breakGateway.broadcastBreakEnded(roomId, auctionId, payload);
+      }
+    }
+  }
+
+  /**
+   * Broadcast chat message (called from ChatGateway)
+   */
+  broadcastChatMessage(roomId: string, payload: any) {
+    if (this.chatGateway) {
+      this.chatGateway.broadcastChatMessage(roomId, payload);
+    }
+  }
+
+  /**
+   * Broadcast presence update (called from PresenceGateway)
+   */
+  broadcastPresenceUpdate(roomId: string) {
+    if (this.presenceGateway) {
+      this.presenceGateway.broadcastPresence(roomId);
+    }
   }
 }

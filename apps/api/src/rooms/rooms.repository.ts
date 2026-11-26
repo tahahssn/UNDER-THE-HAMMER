@@ -223,16 +223,13 @@ export class RoomsRepository {
   }
 
   /**
-   * Check if a user is a member of a room with a specific role
+   * Check if a user is a member of a room (any role)
    */
   async getRoomMember(roomId: string, userId: string) {
-    return this.prisma.roomMember.findUnique({
+    return this.prisma.roomMember.findFirst({
       where: {
-        roomId_userId_role: {
-          roomId,
-          userId,
-          role: 'TEAM_OWNER', // For now, check team owner role
-        },
+        roomId,
+        userId,
       },
     });
   }

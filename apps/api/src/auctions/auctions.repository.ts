@@ -225,6 +225,29 @@ export class AuctionsRepository {
     });
   }
 
+  async getAuctionPlayerById(auctionPlayerId: string) {
+    return this.prisma.auctionPlayer.findUnique({
+      where: { id: auctionPlayerId },
+    });
+  }
+
+  async getRecentAuctionEvents(roomId: string, limit: number = 10) {
+    // Get auction for room, then get recent events
+    const auction = await this.prisma.auction.findUnique({
+      where: { roomId },
+    });
+
+    if (!auction) {
+      return [];
+    }
+
+    return this.prisma.auctionEvent.findMany({
+      where: { auctionId: auction.id },
+      orderBy: { sequence: 'desc' },
+      take: limit,
+    });
+  }
+
   // Transactional operations
   async withTransaction<T>(fn: (prisma: PrismaService) => Promise<T>): Promise<T> {
     return this.prisma.$transaction(async (tx) => {
