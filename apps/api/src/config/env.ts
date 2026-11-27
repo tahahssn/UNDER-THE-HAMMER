@@ -15,6 +15,15 @@ export const envSchema = z.object({
   COGNITO_USER_POOL_ID: z.string().optional(),
   COGNITO_APP_CLIENT_ID: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  // Notifications (Phase N)
+  SENDGRID_API_KEY: z.string().optional(),
+  SENDGRID_FROM_EMAIL: z.string().email().optional().default('noreply@underthehammer.dev'),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_PHONE_NUMBER: z.string().optional(),
+  NOTIFICATION_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+  SMS_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().positive().default(5),
+  SMS_RATE_LIMIT_MAX_PER_WINDOW: z.coerce.number().int().positive().default(1),
 });
 
 export type Env = z.infer<typeof envSchema>;

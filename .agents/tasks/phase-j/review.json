@@ -1,0 +1,30 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "level": "LOW",
+      "section": "Break cadence counter",
+      "finding": "bidsUntilBreak = BREAK_AFTER_N_BIDS - (acceptedThisPlayer % BREAK_AFTER_N_BIDS) counts accepted bids in the current feed, which reconcileFromSnapshot clears on each new player, so the countdown restarts per player rather than tracking the server's configurable/global cadence. AGENTS.md §7 warns the break counter scope must be configurable or explicitly resolved, not silently assumed. Non-blocking: documented as a client preview with the backend authoritative.",
+      "suggestion": "Source the remaining-to-break count from the backend, or scope the client preview explicitly and document the assumption."
+    },
+    {
+      "level": "LOW",
+      "section": "Increment brackets",
+      "finding": "BidPlacementForm defaults incrementBrackets to the product sample tiers (DEFAULT_INCREMENT_BRACKETS) and the page passes no room-configured brackets. For a room with host-configured brackets the client 'next valid bid' preview can disagree with server validation. Backend remains authoritative, so this is a UX mismatch only.",
+      "suggestion": "Fetch the room's configured bid-increment brackets and pass them into BidPlacementForm."
+    },
+    {
+      "level": "LOW",
+      "section": "Break overlay squad requirements",
+      "finding": "mapSquadRules hardcodes currentCount: 0 and satisfied: false for every rule (useAuctionState.ts:164,167), so the break overlay lists the configured requirements but shows no per-team fulfillment; every row reads '0 / min' mid-auction.",
+      "suggestion": "Populate per-team squad progress for the requirement rows, or document that they are static requirement labels."
+    },
+    {
+      "level": "LOW",
+      "section": "Dead prop",
+      "finding": "BidPlacementForm declares roomId as a required prop and the page passes it, but the component never reads it (roomId appears only in the prop declaration).",
+      "suggestion": "Remove the unused roomId prop or use it."
+    }
+  ],
+  "reviewDoc": "d:\\UNDER-THE-HAMMER\\.agents\\tasks\\phase-j\\review.md"
+}

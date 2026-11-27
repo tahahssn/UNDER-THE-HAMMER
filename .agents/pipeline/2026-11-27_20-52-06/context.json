@@ -1,0 +1,26 @@
+{
+  "project_type": "Monorepo: NestJS (Node.js) backend API + Next.js React frontend + TypeScript strict mode + PostgreSQL (Neon) database",
+  "language": "TypeScript",
+  "build_system": "npm workspaces (packages/contracts, packages/database, apps/api, apps/web, apps/e2e) + turbo for caching. Database schema built with Prisma ORM. Build: npm run build, typecheck: npm run typecheck, lint: npm run lint.",
+  "test_framework": "Jest (or Vitest where configured). Backend: unit tests in *.spec.ts, integration tests in *.integration.spec.ts. Frontend: manual testing + optional E2E with Playwright or Cypress.",
+  "build_command": "npm run build",
+  "test_command": "npm run test",
+  "verification_instructions": "1. Run npm run build to compile all packages. 2. Run npm run typecheck for type checking. 3. Run npm run lint for code quality. 4. Run npm run test to execute unit and integration tests. 5. For database: npm run db:migrate to apply migrations, npm run db:build to regenerate Prisma client. 6. For frontend: manual test PricingPage, CheckoutPage, BillingPage in browser at multiple viewports (375px mobile, 768px tablet, 1440px desktop). 7. Manual integration test: create subscription workflow end-to-end via UI and API.",
+  "snapshot_or_generated_files": "Prisma client auto-generated in node_modules/.prisma/client. Database schema generated from schema.prisma. No manual snapshots required; Prisma handles schema versioning via migrations.",
+  "environment_constraints": "1. SAFEPAY_API_KEY and SAFEPAY_WEBHOOK_SECRET must be configured in .env (server-only, never expose to client). 2. DATABASE_URL and DIRECT_URL required for Neon PostgreSQL. 3. SafePay SDK interface must be verified against actual documentation before checkout endpoint goes live. 4. No hardcoded credentials in code or git. 5. All monetary amounts are integers (paisa), no floating-point arithmetic.",
+  "contribution_requirements": "From AGENTS.md: (1) Backend is authoritative for subscription state and payment validity. (2) Use PostgreSQL + Prisma with proper FK constraints. (3) Atomic transactions for financial operations (all-or-nothing). (4) Authenticate sockets/endpoints server-side. (5) Immutable financial audit trail (FinancialLedgerEntry append-only). (6) TypeScript strict mode, no 'any'. (7) Validate all external input. (8) Keep business logic out of React components and Socket.IO handlers. (9) Use services for domain operations, explicit DTOs for contracts. (10) Frontend may calculate display previews, backend revalidates all business rules. (11) Never commit credentials or production secrets. (12) Mandatory test coverage: unit tests for domain rules, integration tests for database behavior and authorization, E2E tests for user journey.",
+  "key_patterns": "1. Repository pattern: data access abstraction layer, no business logic. 2. Service pattern: domain operations, error codes, business rules. 3. Controller pattern: HTTP layer, request validation, authorization guards. 4. DTOs: shared between frontend and backend via packages/contracts. 5. Guards: @SubscriptionGuard, @CurrentUser(), @Permission() for authorization. 6. Atomic operations: Prisma $transaction for multi-table changes. 7. Error codes: explicit domain errors, mapped to HTTP status codes in controllers. 8. React Query/TanStack Query for frontend caching and state management. 9. Zod for runtime validation of server responses. 10. All amounts in paisa (bigint), display formatted as PKR with comma separators.",
+  "relevant_files": [
+    "packages/database/prisma/schema.prisma (SubscriptionPlan, Subscription, Payment, Refund, Invoice, FinancialLedgerEntry, ProviderWebhookEvent models already exist; verify field names and relations)",
+    "apps/api/src/subscriptions/subscriptions.service.ts (existing entitlement checks: canUserHost(), checkEntitlements(); enhance with subscription management)",
+    "apps/api/src/subscriptions/subscription.guard.ts (existing guard on room creation; verify room-hosting eligibility check)",
+    "apps/api/src/subscriptions/subscriptions.controller.ts (existing; enhance with new endpoints for plans, current subscription, cancel)",
+    "apps/api/src/common/logger.service.ts (use for structured logging of all financial operations)",
+    "apps/api/src/common/exceptions/ (error handling pattern; follow for payment-specific errors)",
+    "packages/contracts/ (DTOs shared with frontend; create payments.dto.ts)",
+    "apps/web/hooks/ (pattern for custom hooks; create useSubscription.ts, useCheckout.ts)",
+    "apps/web/app/ (Next.js app router; create pricing/page.tsx, checkout/page.tsx, billing/page.tsx)",
+    "apps/web/components/ (reusable components; create PricingCard.tsx, SubscriptionStatus.tsx, InvoiceTable.tsx)"
+  ],
+  "directory_structure": "apps/api/src/subscriptions/ — subscription service, controller, guards, tests; apps/api/src/payments/ — NEW: payment service, repository, controller, types, tests; packages/contracts/ — DTOs shared with frontend; packages/database/prisma/ — schema and migrations; apps/web/app/pricing/, apps/web/app/checkout/, apps/web/app/billing/ — NEW: payment-related pages; apps/web/hooks/ — useSubscription, useCheckout custom hooks; apps/web/components/ — PricingCard, SubscriptionStatus, InvoiceTable components"
+}

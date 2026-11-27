@@ -1,0 +1,83 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "summary": {
+    "high": 4,
+    "medium": 2,
+    "nit": 2,
+    "total": 8
+  },
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "title": "Missing planId Field in Payment Model",
+      "description": "Design specifies planId field for webhook processing, but schema.prisma shows Payment model does NOT have this field. This is required to calculate subscription period in handlePaymentSuccess without extra queries.",
+      "location": "Design Section 2.2, Schema Section Payment model",
+      "impact": "Webhook handler cannot fetch SubscriptionPlan period without additional round-trip query or storing planId at checkout time",
+      "fix": "Add planId field to Payment model: ALTER TABLE Payment ADD COLUMN planId UUID NOT NULL REFERENCES SubscriptionPlan(id) ON DELETE RESTRICT"
+    },
+    {
+      "id": 2,
+      "severity": "HIGH",
+      "title": "Missing checkoutUrl and providerSessionId Fields in Payment",
+      "description": "Design specifies these fields for idempotent caching, but schema.prisma shows they do NOT exist in Payment model. Without these, duplicate checkout requests will trigger new SafePay API calls instead of returning cached URLs.",
+      "location": "Design Section 2.2, Schema Section Payment model",
+      "impact": "Idempotency guarantee violated; duplicate requests create duplicate Payment records and waste SafePay quota",
+      "fix": "Add both fields to Payment model: ALTER TABLE Payment ADD COLUMN checkoutUrl TEXT; ALTER TABLE Payment ADD COLUMN providerSessionId TEXT;"
+    },
+    {
+      "id": 3,
+      "severity": "HIGH",
+      "title": "SafePay SDK Interface Not Verified Against Actual Implementation",
+      "description": "Design (Section 3.6) documents assumed SafePay SDK interface as a template to verify, but no verification has been performed. Code assumes method names (createCheckoutSession), return fields (checkoutUrl, sessionId), and webhook field names that may not match actual SDK.",
+      "location": "Design Section 3.6 and Section 3.2 (SafepayService)",
+      "impact": "Runtime failures, payment processing bugs, security issues if webhook signature verification differs from assumptions",
+      "fix": "Before implementation: (1) npm install safepay, (2) Read SafePay Node.js SDK documentation, (3) Verify method signatures and field names, (4) Update interface contract if actual SDK differs, (5) Update design addendum with confirmed interface"
+    },
+    {
+      "id": 4,
+      "severity": "HIGH",
+      "title": "Webhook Payload Field Mapping Ambiguity",
+      "description": "Design handles webhook by extracting fields with fallbacks (payload.id || payload.eventId, payload.orderRef || payload.referenceId). No clarity on which field names SafePay actually uses. Defensive fallbacks mask malformed webhook bugs.",
+      "location": "Design Section 3.2, processWebhook and handlePaymentSuccess methods",
+      "impact": "Silent acceptance of malformed webhooks; difficult debugging if SafePay changes field names",
+      "fix": "After SafePay SDK verification: Use exact field names per SafePay spec. Remove fallback logic. Fail fast with BadRequestException if fields are missing or unexpected."
+    },
+    {
+      "id": 5,
+      "severity": "MEDIUM",
+      "title": "Error Classification Contradicts HTTP Status Codes",
+      "description": "Error handling table (Section 3.2) classifies NotFoundException as returning 202 (retriable). However, NestJS NotFoundException throws exception that maps to 404 HTTP status, not 202. This violates SafePay's retry semantics (401=don't retry, 202=retry later).",
+      "location": "Design Section 3.2, Error Handling Summary table and handlePaymentSuccess",
+      "impact": "SafePay may misinterpret error status and stop retrying when it should retry (or vice versa). Webhook reliability degraded.",
+      "fix": "Clarify webhook controller error mapping: (1) 401 for signature invalid (don't retry), (2) 202 for all retriable errors (payment not found, DB errors). Use HttpException with status 202 or similar mechanism to control HTTP status independently of exception type."
+    },
+    {
+      "id": 6,
+      "severity": "MEDIUM",
+      "title": "SafePay API Error Handling in Checkout Not Differentiated",
+      "description": "Design catches all SafePay API errors generically and throws ServiceUnavailableException(503). No distinction between temporary network outages (should return 503), authentication failures (should alert ops), and invalid request formats (should return 500, signal implementation bug).",
+      "location": "Design Section 3.2, createCheckoutSession error handling",
+      "impact": "Loss of diagnostic information; ops team cannot distinguish between user-recoverable errors and system failures that require investigation",
+      "fix": "Classify SafePay API errors: (1) 401/403 → operational error, alert ops, return 503 to user, (2) 400/422 → implementation bug, return 500, (3) ECONNREFUSED/ETIMEDOUT → temporary, return 503 to user"
+    },
+    {
+      "id": 7,
+      "severity": "NIT",
+      "title": "Ambiguity in Invoice.number Generation",
+      "description": "Design (Section 3.2, generateInvoiceNumber) generates invoice number as INV-{year}-{count}. The count is global (await tx.invoice.count()), not per-year, so invoice numbers don't reset annually (INV-2026-000001, INV-2026-000002, ..., INV-2027-000050). Unclear if this is intended.",
+      "location": "Design Section 3.2, generateInvoiceNumber method",
+      "impact": "Potential accounting confusion if numbers are expected to reset per fiscal/calendar year",
+      "fix": "Clarify intended behavior: (Option A) Per-year numbering: filter count by year (count invoices issued this year only); (Option B) Global numbering: document that numbers don't reset and are globally sequential"
+    },
+    {
+      "id": 8,
+      "severity": "NIT",
+      "title": "Frontend Callback Endpoint Not Specified",
+      "description": "Design (Section 3.2) specifies SafePay returnUrl as {APP_URL}/checkout-callback/{planId}/{sessionId}, but frontend CheckoutPage (Section 4.2) does not implement this callback endpoint. Page redirects to SafePay but has no logic to handle the return redirect from SafePay.",
+      "location": "Design Section 3.2 (link generation) vs. Section 4.2 (CheckoutPage component)",
+      "impact": "Incomplete checkout flow; callback handling is unspecified, leading to confusion about state transitions and user guidance",
+      "fix": "Add callback handler page apps/web/src/app/checkout-callback/[planId]/[sessionId]/page.tsx that handles SafePay redirect with status and error query params. Update design to document expected redirect format and timing (callback may fire before or after webhook)"
+    }
+  ]
+}

@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed": "tsx prisma/seed.ts"
   },
-  "dependencies": {
+  "devDependencies": {
     "@prisma/client": "5.22.0"
   }
 }

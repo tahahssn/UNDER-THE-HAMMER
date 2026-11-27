@@ -1,0 +1,50 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Frontend Pricing, Checkout & Billing Pages. Implements PricingPage (GET /pricing) displaying active subscription plans in responsive card grid with entitlements, CheckoutPage (GET /checkout/:planId) handling SafePay checkout redirect and payment callback (success → /billing, failure → error state with retry), and BillingPage (GET /billing) showing current subscription details and invoice history. Includes custom hooks useSubscription() and useCheckout() for data fetching and state management via React Query. SubscriptionStatus component for reuse in profile dropdown and room-creation workflows. All pages responsive (375px mobile, 768px tablet, 1440px desktop), respect reduced-motion preference. All amounts formatted from paisa to PKR with proper locale formatting. No hardcoded plans, prices, or SafePay credentials exposed to client.",
+  "status": "pending",
+  "steps": [
+    "Create apps/web/hooks/useSubscription.ts: Custom hook returns { subscription, isLoading, error, refetch }. Calls GET /v1/subscriptions/current on mount. Uses React Query with 5 min stale time for caching. Handles errors gracefully (null subscription if 401 or other error). Memoized to prevent unnecessary re-renders. Export for use in multiple pages.",
+    "Create apps/web/hooks/useCheckout.ts: Custom hook accepts (planId, idempotencyKey?). Returns { initiateCheckout, isLoading, checkoutUrl, error }. initiateCheckout() calls POST /v1/subscriptions/checkout/:planId with auto-generated UUID if idempotencyKey not provided. Caches response in state so duplicate calls return same checkoutUrl without new API requests. Handles network errors with retry logic. Use React Query or manual state.",
+    "Create apps/web/components/PricingCard.tsx: Reusable component for displaying single plan. Props: plan (SubscriptionPlan with entitlements), isCurrentPlan (bool). Shows plan name, price (formatted from paisa to PKR, e.g., 50000 → 'PKR 500'), period (month/year), entitlements as bullet list (hostingEnabled, maxActiveRooms, etc.). CTA button: 'Subscribe Now' (links to /checkout/:planId) or 'Current Plan' (if isCurrentPlan). Responsive, no hardcoded sizes. Respects cursor-pointer, hover states with smooth transitions.",
+    "Create apps/web/components/SubscriptionStatus.tsx: Small component (2-3 lines) displaying subscription status badge. Props: subscription (Subscription | null), isLoading (bool). Shows ACTIVE (green), GRACE (yellow), CANCELLED (red), EXPIRED (gray) with icon and label. Used in (1) profile dropdown, (2) room-creation modal to disable 'Host Room' button if no active subscription.",
+    "Create apps/web/components/InvoiceTable.tsx: Reusable component for invoice history. Props: invoices (paginated array), isLoading, pagination handlers (onPreviousPage, onNextPage, page). Displays table: Date (formatted ISO or locale), Amount (formatted from paisa to PKR), Status (PENDING/PAID/REFUNDED), Link to view/download (placeholder for future S3 signed URL). Responsive: table on desktop, card view on mobile. No hardcoded column widths.",
+    "Create apps/web/app/pricing/page.tsx: Pricing page component. Fetches plans via GET /v1/subscriptions/plans (public, no auth). Fetches current subscription via useSubscription hook. Displays: (1) Hero section with 'Pricing Plans' heading, (2) plan cards in responsive grid (1 col mobile, 2-3 cols desktop) using PricingCard component, (3) FAQ or feature comparison (optional, can be static). Loading state shows spinner. Error state offers retry. No hardcoded plans in component (all from API).",
+    "Create apps/web/app/checkout/page.tsx: Checkout page component. Gets planId from URL params. Calls useCheckout(planId) hook. Displays: (1) loading state while checkout URL is being generated, (2) SafePay checkout iframe/redirect once URL ready. Handles post-checkout redirects: success (redirectUrl contains /checkout-callback/success) → redirect to /billing?success=true, show toast 'Subscription activated'. Failure (redirectUrl contains /checkout-callback/failure) → show error message with retry button. Stores sessionId in component state for reference.",
+    "Create apps/web/app/billing/page.tsx: Billing page component. Calls useSubscription hook. Renders: (1) If active subscription: show plan name, renewal date (formatted), current price (from paisa to PKR), 'Cancel Subscription' button. (2) Invoice history table: paginated GET /v1/subscriptions/invoices. (3) If no active subscription: show 'No active subscription' message with CTA link to /pricing. Loading state shows spinner on each section.",
+    "Create apps/web/components/CancelSubscriptionModal.tsx (optional): Modal for subscription cancellation confirmation. Props: subscription, onConfirm, onCancel. Calls POST /v1/subscriptions/:id/cancel on confirm. Shows warning: 'Your subscription will end at <renewalDate>.' Handles errors (403 ownership, 404 not found, network).",
+    "Update apps/web/components/ProfileDropdown.tsx: Add SubscriptionStatus component to show user's current subscription status (ACTIVE, EXPIRED, etc.). Disables or highlights based on status. If no subscription, link to /pricing.",
+    "Update room-creation flow (apps/web/components/CreateRoomModal.tsx or similar): Add SubscriptionStatus component and disable 'Create Room' button if user has no active subscription. Show tooltip: 'Active subscription required to host a room'. Call useSubscription hook to check eligibility.",
+    "Update .env.example: Document frontend-visible environment variables (if any). Backend secrets (SAFEPAY_API_KEY, SAFEPAY_WEBHOOK_SECRET) remain server-only, never exposed to client. Add comments explaining what each var is used for.",
+    "Create optional E2E test apps/e2e/checkout.e2e.ts (or similar): End-to-end flow test: (1) User navigates to /pricing. (2) User clicks 'Subscribe'. (3) Checkout page loads with SafePay URL. (4) Mock SafePay webhook (payment_success event) is triggered by test. (5) Redirect to /billing?success=true. (6) Billing page shows active subscription. (7) User can now create a room (verify eligibility check passes). Use test database for Payment records."
+  ],
+  "acceptance_criteria": [
+    "PricingPage displays active plans from API, no hardcoded prices, responsive layout (1 col mobile, 2-3 cols desktop), plan cards show name, price (formatted PKR), period, entitlements, CTA button",
+    "CheckoutPage receives planId from URL, generates unique checkout URL via useCheckout hook, handles success/failure redirects correctly",
+    "BillingPage shows active subscription with renewal date and price, displays paginated invoice history with dates and amounts (formatted in PKR)",
+    "SubscriptionStatus component used in profile dropdown and room-creation workflow, disables 'Host Room' button if no active subscription",
+    "useSubscription hook fetches GET /v1/subscriptions/current, caches response with 5 min stale time, returns { subscription, isLoading, error, refetch }",
+    "useCheckout hook calls POST /v1/subscriptions/checkout/:planId, generates idempotencyKey UUID, caches response so duplicate calls return same URL",
+    "All monetary amounts formatted from paisa to PKR (e.g., 50000 paisa → 'PKR 500') with proper locale formatting and comma separators",
+    "Pages responsive at 375px (mobile), 768px (tablet), 1440px (desktop), no horizontal scroll",
+    "No emoji icons used; all icons from consistent set (Heroicons/Lucide)",
+    "Respects prefers-reduced-motion preference (no unnecessary animations)",
+    "No SafePay credentials or secrets exposed to client (all API calls go through Next.js backend)",
+    "Authorization verified: profile dropdown and room-creation pages update SubscriptionStatus when subscription data changes"
+  ],
+  "verification": [
+    "npm run build -- --filter=web succeeds",
+    "npm run typecheck passes for apps/web",
+    "Manual test: navigate to /pricing, see plans, click 'Subscribe'",
+    "Manual test: checkout page loads, displays SafePay URL (or mock in dev)",
+    "Manual test: success callback redirects to /billing with active subscription",
+    "Manual test: billing page shows current subscription and invoice history",
+    "Manual test: profile dropdown shows SubscriptionStatus correctly",
+    "Manual test: room-creation modal disables button if no active subscription",
+    "Manual test: responsive layout at 375px, 768px, 1440px viewports",
+    "Visual regression test: no layout shifts on hover, smooth transitions (150-300ms), cursor-pointer on interactive elements",
+    "Optional E2E test: complete checkout flow passes"
+  ],
+  "blocked_reason": null,
+  "findings": "Depends on FEAT-002 (API endpoints and DTOs). Frontend assumes API contracts defined in packages/contracts/payments.dto.ts. All API calls use axios with Zod validation for responses. React Query caching strategy: plan list cached 5 min on backend via @Cacheable; frontend queries can use React Query with longer stale time (10 min). Invoice PDF download links currently placeholders; actual S3 signed URL generation deferred to Admin Phase."
+}

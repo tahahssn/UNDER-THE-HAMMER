@@ -1,0 +1,150 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "reviewDate": "2026-11-27",
+  "reviewedAgainst": "01-requirements.md",
+  "revisionReview": true,
+  "summaryHighFindings": 2,
+  "summaryMediumFindings": 1,
+  "summaryNitFindings": 5,
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "title": "Missing Event Emission Implementation in AuctionsModule",
+      "location": "Section 4, Event Triggers and Integration",
+      "problem": "Design specifies event emission (bid.accepted, break.started, etc.) as trigger mechanism, but AuctionsModule code does not emit these events. Design assumes events will be added but leaves ambiguous whether this is in scope for Notifications phase or will be done by Auctions team.",
+      "impact": "Without confirmed event emission, NotificationService has no way to trigger notifications on auction state changes. Breaks acceptance criteria #11, #16–18.",
+      "fix": "Explicitly document: (1) Will AuctionsModule emit required events using EventEmitter2? (2) If yes, is this in scope for Notifications phase? (3) If no, propose alternative trigger mechanism (database polling, direct method calls). (4) Update design section to reflect agreed approach."
+    },
+    {
+      "id": 2,
+      "severity": "HIGH",
+      "title": "Missing Migration Instructions for Required Schema Changes",
+      "location": "Section 3, Data Model; Section 2, Technology Stack; Section 8, Deployment",
+      "problem": "Design identifies two required Prisma migrations (add SMS to enum, add phoneNumber to UserProfile) but provides no migration instructions, SQL, or guidance on sequencing. Assumes developers will know to run prisma migrate but doesn't specify strategy.",
+      "impact": "Developers cannot implement system until they know exact migration strategy. This is a blocker for implementation.",
+      "fix": "Add Database Migrations subsection under Section 8 with: (1) Exact Prisma migration steps, (2) SQL for SMS enum addition, (3) SQL for phoneNumber column, (4) Guidance on when to apply migrations relative to code deployment, (5) Rollback procedure."
+    },
+    {
+      "id": 3,
+      "severity": "MEDIUM",
+      "title": "Ambiguous NotificationDelivery Timestamp Management",
+      "location": "Section 3, Data Model; Section 4, NotificationDeliveryService",
+      "problem": "Schema includes updatedAt with @updatedAt directive, but adapters don't explicitly document that Prisma automatically updates this field. Unclear whether queries should use createdAt or updatedAt for retry logic and monitoring.",
+      "impact": "Implementers may misunderstand timestamp semantics and query wrong field for retry logic, affecting retry mechanism and monitoring dashboards.",
+      "fix": "Add explicit note in Section 4: 'When adapters update NotificationDelivery fields, Prisma automatically updates updatedAt via @updatedAt directive. Use updatedAt (not createdAt) for retry queries and monitoring.' Update getPendingDeliveries method to clarify: query status=PENDING AND updatedAt < (now - olderThanMinutes)."
+    },
+    {
+      "id": 4,
+      "severity": "NIT",
+      "title": "Unclear Breaking Change Impact of Adding SMS to NotificationChannel Enum",
+      "location": "Section 3, Data Model",
+      "problem": "Migration adds SMS to enum. Existing code with exhaustive switch statements on NotificationChannel will fail TypeScript strict mode checks or crash at runtime when encountering SMS value. Design doesn't warn about this.",
+      "impact": "Developers may not update all code paths that validate or handle NotificationChannel, causing runtime errors.",
+      "fix": "Add note to Section 2 or Section 8: 'Adding SMS to NotificationChannel enum is a breaking change. All code that validates or exhaustively handles NotificationChannel must be updated to include SMS case. This includes preference endpoints, adapter dispatch logic, and client-side filters. These updates should be completed before or as part of same deployment as migration.'"
+    },
+    {
+      "id": 5,
+      "severity": "NIT",
+      "title": "Email Adapter Error Codes Incomplete / Inconsistent",
+      "location": "Section 4, Email Adapter; Section 6, Error Codes",
+      "problem": "Email Adapter specifies error codes like SENDGRID_AUTH_FAILED, but canonical error list in Section 6 uses NOTIFICATION_SENDGRID_AUTH_FAILED prefix. Inconsistent naming may cause logs to be unsearchable.",
+      "impact": "Error logs will be difficult to aggregate or search if prefix naming is inconsistent.",
+      "fix": "Update Section 4 adapter error codes to align with Section 6 canonical list. All error codes should use NOTIFICATION_ prefix: NOTIFICATION_SENDGRID_AUTH_FAILED, NOTIFICATION_SENDGRID_RATE_LIMIT, etc."
+    },
+    {
+      "id": 6,
+      "severity": "NIT",
+      "title": "Missing E164 Phone Number Validation Specification",
+      "location": "Section 3, Data Model; Section 4, SMS Adapter",
+      "problem": "Design states phoneNumber must be E.164 format and 'validation layer will enforce it', but doesn't specify where validation happens: UserProfile endpoint, SMS Adapter, or both? What happens if invalid number is stored?",
+      "impact": "Implementers must guess where validation belongs, risking duplicate logic or missed validation at insertion point.",
+      "fix": "Add subsection to Section 4 SMS Adapter: 'Phone Number Validation: Before SMS dispatch, validate format with regex ^\+[1-9]\\d{1,14}$. If invalid, log NOTIFICATION_SMS_PHONE_INVALID, update delivery status=FAILED, return without calling Twilio. Phone numbers should also be validated when stored in UserProfile endpoint to prevent invalid data at source.'"
+    },
+    {
+      "id": 7,
+      "severity": "NIT",
+      "title": "Missing Guidance on RoomMember Status Filter for Break Notifications",
+      "location": "Section 4, Event Listener Implementation (onBreakStarted)",
+      "problem": "Design shows query assuming a status field exists but doesn't specify whether to filter by status=ACTIVE or include all members (including those with leftAt set). Unclear if users who left before break should still receive notification.",
+      "impact": "Recipient set ambiguous; may send to inactive members or miss spectators.",
+      "fix": "Clarify in Section 4 onBreakStarted: 'Query RoomMembers with where: { roomId, status: ACTIVE, leftAt: null }. This ensures only currently active members (not those who have left) receive notification.'"
+    },
+    {
+      "id": 8,
+      "severity": "NIT",
+      "title": "Ambiguous Idempotency Check Timing and Conditions",
+      "location": "Section 4, NotificationService > Idempotency",
+      "problem": "Idempotency check description is vague about: (1) Does rapid successive bids deduplicate? (2) Window measured from creation or dispatch? (3) If notification exists but is read, does idempotency still apply?",
+      "impact": "Developers may implement dedup incorrectly, creating duplicates or missing legitimate ones.",
+      "fix": "Clarify idempotency logic with example: 'Query existing unread notification where userId=intent.userId AND category=intent.category AND data.auctionId=intent.auctionId AND data.playerId=intent.playerId AND createdAt > (now-1min) AND readAt IS NULL. If found, return existing record. If not, create new. Example: Two BID_WON notifications for same player within 1 minute will deduplicate. If user marks first as read, retry will create new notification.'"
+    }
+  ],
+  "verifiedAssumptions": [
+    "Notification schema fields (id, userId, category, title, body, data, readAt, createdAt, deliveries relation, index) match schema.prisma",
+    "NotificationChannel enum supports IN_APP and EMAIL in schema.prisma",
+    "NotificationDelivery schema (id, notificationId, channel, status, attempts, sentAt, error, createdAt, updatedAt) matches schema.prisma",
+    "UserNotificationPreference schema (userId, category, channel, enabled, consentedAt, unique constraint) matches schema.prisma",
+    "User model has notifications relation (Notification[])",
+    "RoomMember model has status field (MemberStatus @default(ACTIVE)) and leftAt field",
+    "Bid model uses amountMinor (BigInt) for amount, aligning with financial correctness requirement"
+  ],
+  "unverifiedAssumptions": [
+    {
+      "claim": "EventEmitter2 and @nestjs/event-emitter are available",
+      "status": "NOT FOUND",
+      "details": "Neither package appears in apps/api/package.json. This is a blocker for event-driven architecture."
+    },
+    {
+      "claim": "AuctionsModule emits domain events (bid.accepted, break.started, etc.)",
+      "status": "NOT VERIFIED",
+      "details": "Existing AuctionEventBroadcasterService handles WebSocket broadcasting, not durable domain event emission. Event emission not currently implemented."
+    },
+    {
+      "claim": "Redis is available for rate-limit storage",
+      "status": "NOT CONFIRMED",
+      "details": "Neither redis nor ioredis packages found in dependencies. Rate-limiting cannot be implemented without Redis client."
+    },
+    {
+      "claim": "SendGrid SDK (@sendgrid/mail) will be added",
+      "status": "NOT IN DEPENDENCIES",
+      "details": "Package not currently installed. Must be added before implementation."
+    },
+    {
+      "claim": "Twilio SDK (twilio) will be added",
+      "status": "NOT IN DEPENDENCIES",
+      "details": "Package not currently installed. Must be added before implementation."
+    },
+    {
+      "claim": "UserProfile has phoneNumber field",
+      "status": "NOT FOUND",
+      "details": "Current schema does not include phoneNumber. Migration required (design specifies this)."
+    },
+    {
+      "claim": "NotificationChannel enum supports SMS",
+      "status": "NOT FOUND",
+      "details": "Current enum only defines IN_APP and EMAIL. Migration required to add SMS."
+    }
+  ],
+  "blockers": [
+    "Event emission mechanism: Confirm whether AuctionsModule will emit events and provide implementation plan",
+    "Missing dependencies: Confirm @nestjs/event-emitter, @sendgrid/mail, twilio, ioredis will be added to package.json",
+    "Migration strategy: Define exact Prisma migration steps for SMS enum and phoneNumber field"
+  ],
+  "designQualityRating": {
+    "strengths": [
+      "Clear service layer design with well-defined responsibilities",
+      "Comprehensive error handling and status tracking",
+      "Good coverage of database invariants and referential integrity",
+      "Thorough testing strategy aligned with requirements",
+      "Strong documentation of environment variables and security concerns",
+      "Responsive to prior review findings; shows iterative improvement"
+    ],
+    "weaknesses": [
+      "Event-driven architecture not grounded in actual codebase (no existing event emitter)",
+      "Missing Redis and third-party SDK availability confirmation",
+      "Vague on migration strategy and breaking change impact",
+      "Some ambiguity on timestamp semantics and phone validation"
+    ]
+  }
+}

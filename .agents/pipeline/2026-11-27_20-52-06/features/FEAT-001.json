@@ -1,0 +1,38 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Backend Payment Service & SafePay Integration. Implements database schema changes (add planId, checkoutUrl, providerSessionId to Payment model), SafePay types contract, PaymentsRepository with atomic upsert for idempotency, and SafepayService with checkout session creation and webhook processing (payment success/failure/refund, transactional subscription activation, error classification, replay detection). All amounts in PKR paisa (integer minor units). Includes comprehensive unit tests for idempotency, webhook replay detection, transactional atomicity, and error handling.",
+  "status": "pending",
+  "steps": [
+    "Create migration 20261127_add_payment_fields.sql: Add planId (UUID FK), checkoutUrl (TEXT), providerSessionId (TEXT) columns to Payment table with proper indexes. Test: npm run db:migrate --name add_payment_fields succeeds.",
+    "Update packages/database/prisma/schema.prisma: Add planId, checkoutUrl, providerSessionId fields to Payment model, add FK relation to SubscriptionPlan, update SubscriptionPlan with reverse Payment relation. Run npm run db:build to regenerate Prisma client.",
+    "Create apps/api/src/payments/safepay.types.ts: Define TypeScript interfaces for SafePay SDK (CheckoutClient, createCheckoutSession response, webhook payload structure). Document assumptions and verification status. This is a contract to verify against actual SafePay SDK docs before implementation.",
+    "Install SafePay SDK and verify interface: npm install safepay in apps/api. Read SafePay documentation (https://docs.safepay.com.pk). Verify: CheckoutClient class exists, createCheckoutSession() method signature, webhook event field names (id vs eventId, type vs eventType, etc.), HMAC-SHA256 verification method. Update safepay.types.ts to match actual SDK. Test: npm run typecheck passes.",
+    "Create apps/api/src/payments/payments.repository.ts: Implement data access layer with methods: upsertPaymentByIdempotencyKey (atomic upsert, fixes race condition), getPaymentByIdempotencyKey, updatePaymentCheckoutUrl, createProviderWebhookEvent (unique constraint enforces idempotency), updateWebhookEventProcessed, updateWebhookEventError, transactional wrapper, getRefundByProviderRefundId, createLedgerEntry, queryLedgerEntries. No business logic in this layer.",
+    "Create apps/api/src/payments/safepay.service.ts: Implement SafepayService with methods: (1) createCheckoutSession(userId, planId, idempotencyKey?) — calls atomic upsert to prevent race, calls SafePay API, returns cached response on duplicate idempotencyKey. (2) processWebhook(payload, signature) — verifies HMAC-SHA256 signature, creates ProviderWebhookEvent (replay detection via unique constraint), dispatches to event handlers. (3) handlePaymentSuccess — transactional: update Payment.status=PAID, create Subscription (status=ACTIVE, period-based end date), create Invoice, create FinancialLedgerEntry. (4) handlePaymentFailed — idempotent status update. (5) handleRefundSuccess — transactional refund processing. Error classification per design review: 401 for signature invalid, 202 for all retriable errors, 400 never sent.",
+    "Create packages/contracts/payments.dto.ts: Define DTOs for checkout flow: CreateCheckoutRequest (planId, idempotencyKey?), CheckoutResponse (checkoutUrl, sessionId, paymentId), GetCurrentSubscriptionResponse, GetInvoicesResponse (paginated). Use Zod for runtime validation. These DTOs are shared between backend and frontend.",
+    "Enhance apps/api/src/subscriptions/subscriptions.service.ts: Verify/add methods: getActiveSubscription(userId), canUserHost(userId), checkEntitlements(userId) returning subscription limits, cancelSubscription(userId, subscriptionId) setting cancelAtPeriodEnd flag, getInvoices(userId, skip, take) for pagination. Ensure room-creation guard calls canUserHost() correctly.",
+    "Create apps/api/src/payments/safepay.service.spec.ts: Unit tests covering (1) createCheckoutSession idempotency: same idempotencyKey returns cached URL without duplicate SafePay API call. (2) webhook success flow: Payment → Subscription → Invoice → FinancialLedgerEntry all created atomically, amounts verified as integers (no floating-point), period calculations correct. (3) webhook failure flow: Payment.status=FAILED, no Subscription created. (4) refund flow: Payment and Refund status updated, LedgerEntry created. (5) webhook replay detection: duplicate providerEventId is no-op. (6) signature verification: invalid signature throws UnauthorizedException. (7) error handling: NotFoundException on missing payment (202 retriable), amount mismatch (400 fatal). Test: npm run test -- payments.service.spec passes with >90% coverage."
+  ],
+  "acceptance_criteria": [
+    "npm run db:migrate succeeds, Payment schema includes planId, checkoutUrl, providerSessionId fields with proper constraints",
+    "npm run build succeeds, npm run typecheck passes, all Payment-related types are correct",
+    "SafepayService.createCheckoutSession is idempotent: calling twice with same idempotencyKey returns cached response without duplicate SafePay API calls",
+    "Payment records created at checkout have planId set for webhook processing",
+    "Webhook processing is transactional: on payment_success, Payment → Subscription → Invoice → FinancialLedgerEntry all created atomically or all rolled back",
+    "Webhook replay detection works: duplicate providerEventId (same webhook re-sent) results in no-op, payment not duplicated, subscription not duplicated",
+    "All monetary amounts are integers (paisa) stored as BigInt; no floating-point arithmetic or rounding errors",
+    "Error handling: signature invalid returns 401, retriable errors return 202, amount mismatch triggers 400 and logs critical error",
+    "Unit tests pass with >90% coverage for SafepayService",
+    "PaymentsRepository methods tested for atomicity (concurrent requests don't cause race condition on upsertPaymentByIdempotencyKey)"
+  ],
+  "verification": [
+    "npm run build succeeds for all packages",
+    "npm run typecheck passes",
+    "npm run test -- payments.service.spec passes, coverage >90%",
+    "npm run db:build succeeds, Prisma client types match new Payment schema",
+    "Manual verification: create two concurrent checkout requests with same idempotencyKey, verify only one SafePay API call is made and both clients receive same checkoutUrl"
+  ],
+  "blocked_reason": null,
+  "findings": "SafePay SDK interface must be verified against actual documentation (https://docs.safepay.com.pk) before checkout implementation. If actual SDK method signatures or webhook field names differ from Section 3.6 assumptions in design, update safepay.types.ts and SafepayService accordingly. This should be first task completed in this feature to unblock remaining items."
+}

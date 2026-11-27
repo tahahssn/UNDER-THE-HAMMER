@@ -1,0 +1,123 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "summary": "4 HIGH, 2 MEDIUM, 7 NIT findings. Design is substantive but contains unverified claims about payment provider patterns, ambiguous retry/backoff contract, undefined cache-key normalization, and missing staleness indicators in API responses. HIGH findings must be resolved before implementation.",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "title": "Unverified claim about payment provider abstraction pattern",
+      "location": "Architecture Decisions § 1, pg. 3",
+      "description": "Design claims existing payment provider abstraction in ARCHITECTURE.md as precedent. Verification shows no payment module exists in codebase; ARCHITECTURE.md only describes a diagram without implementation details. Claim cannot be verified.",
+      "impact": "Design lacks concrete, proven precedent; implementers may face unfamiliar patterns or inconsistency.",
+      "fix": "Remove reference to payment provider abstraction or add implementation details if it exists. Simplify justification to industry best practices."
+    },
+    {
+      "id": 2,
+      "severity": "HIGH",
+      "title": "Missing concrete example of withBackoffRetry and retry logic",
+      "location": "Service Layer Design § ESPNDataProvider, pg. 6",
+      "description": "withBackoffRetry pseudocode does not specify how to distinguish retryable errors from non-retryable, what constitutes 'exhausted retries', or the contract between provider and service layer for cache fallback.",
+      "impact": "Implementer must guess whether backoff belongs in provider or service, risking incorrect retry behavior.",
+      "fix": "Clarify: withBackoffRetry throws ProviderError after max retries; calling service catches and checks cache. Specify 429 is only retryable HTTP status. Add HTTP client timeout config (10 seconds suggested)."
+    },
+    {
+      "id": 3,
+      "severity": "HIGH",
+      "title": "Ambiguous cache key design for search queries",
+      "location": "Cache Details § Cache Keys, pg. 11",
+      "description": "Cache key includes raw search query. Design does not specify if query is lowercased, spaces normalized, or URL-encoded. Identical searches with different casing/spacing will cache separately, reducing hit rate.",
+      "impact": "Cache efficiency degraded; may require manual invalidation if normalization rules change.",
+      "fix": "Add rule: 'Search query cache normalization: Trim whitespace, lowercase, deduplicate consecutive spaces. Example: ' Virat  Kohli ' → 'virat kohli'.'"
+    },
+    {
+      "id": 4,
+      "severity": "HIGH",
+      "title": "Stale cache flag implementation undefined",
+      "location": "Caching Details § In-Memory Cache Structure, pg. 11; Endpoints, pg. 9",
+      "description": "Design shows stale?: boolean field in cache but never specifies when flag is set, how caller knows if data is stale, or whether API response includes staleness. Backend error handling says 'returns stale data with a flag' but response DTOs don't include one. Contradiction.",
+      "impact": "Frontend cannot distinguish fresh vs. stale data. API response design is inconsistent with implementation.",
+      "fix": "Decide if API response includes stale flag (recommend: yes). Update response DTOs with optional 'stale: boolean'. Clarify: 'Set to true only on provider error fallback; always false for fresh data.'"
+    },
+    {
+      "id": 5,
+      "severity": "MEDIUM",
+      "title": "Undefined behavior when Redis is unreachable",
+      "location": "Configuration and Environment Variables § Startup Validation, pg. 10",
+      "description": "Design states 'log WARN and fall back to in-memory cache' but does not specify: when Redis is checked (startup or lazy), whether app fails/proceeds, how mid-operation Redis failures are handled, or fallback gracefully.",
+      "impact": "Misconfigured or unreachable Redis could silently degrade performance or lose data without alerting operators.",
+      "fix": "Add: 'Redis connection validated at startup with 5-second timeout. If fails, log ERROR and proceed with in-memory cache. At runtime, if Redis op fails, catch and retry with in-memory fallback for that operation only.'"
+    },
+    {
+      "id": 6,
+      "severity": "MEDIUM",
+      "title": "Request deduplication deferred without implementation notes",
+      "location": "Edge Cases § Concurrent Cache Access, pg. 15; Implementation Sequence, pg. 16",
+      "description": "Design identifies concurrent requests as edge case and defers deduplication to Phase N, but does not specify whether it's performance optimization or correctness requirement, or where it would fit if added.",
+      "impact": "Phase M may issue duplicate provider calls under concurrent load, wasting API quota. Implementer may add ad-hoc deduplication, breaking design.",
+      "fix": "Add note: 'Phase M does not deduplicate. Concurrent requests for same cache key may trigger duplicate provider calls; this is acceptable for MVP. Optional Phase N enhancement: track in-flight requests in Map<cacheKey, Promise> and return first promise to later callers.'"
+    },
+    {
+      "id": 7,
+      "severity": "NIT",
+      "title": "Axios/HttpClient dependency not specified",
+      "location": "Service Layer Design § ESPNDataProvider, pg. 6",
+      "description": "Pseudocode uses this.httpClient.get() but does not specify HTTP client library (NestJS HttpService, axios, or custom wrapper).",
+      "impact": "Implementer may choose wrong HTTP client, causing integration issues.",
+      "fix": "Add: 'HTTP calls use NestJS HttpService from @nestjs/axios. Inject via constructor: @Inject(HttpService) private readonly httpService: HttpService.'"
+    },
+    {
+      "id": 8,
+      "severity": "NIT",
+      "title": "Match info cache TTL inconsistency with requirements",
+      "location": "Service Layer Design § LiveMatchService, pg. 7; Requirements FR5, pg. 4",
+      "description": "Design specifies 5-minute TTL for matches inline, but FR5 requires 'minimum 1-hour TTL for cached player statistics and match data'. Unclear if exception is authorized or if requirement should be refined.",
+      "impact": "Requirements compliance ambiguous; may be flagged during review or enforcement.",
+      "fix": "Either refine FR5: 'Minimum 1-hour TTL for player stats; match data may use shorter TTL (5-10 min suggested) due to frequent updates.' Or make matches use 1-hour TTL and document as conservative."
+    },
+    {
+      "id": 9,
+      "severity": "NIT",
+      "title": "Service layer request deduplication mechanism not specified",
+      "location": "Service Layer Design § CricketDataService, pg. 5",
+      "description": "Pseudocode does not show deduplication pattern. Design acknowledges deferred edge case but should explicitly state Phase M allows duplicate provider calls.",
+      "impact": "Minor; deferred pattern is acceptable for MVP but should be explicit.",
+      "fix": "Add note: 'Phase M does not implement request deduplication. Simultaneous requests for same cache key may trigger duplicate provider calls; acceptable for initial launch, optimizable in Phase N.'"
+    },
+    {
+      "id": 10,
+      "severity": "NIT",
+      "title": "Error response timestamp not specified in schema",
+      "location": "Endpoints and Request/Response Design § Error Responses, pg. 9",
+      "description": "Error response shows timestamp field but does not specify timezone (UTC vs. local), format (ISO 8601 assumed), or whether existing ErrorBody interface requires update.",
+      "impact": "Minor inconsistency; implementer may guess on format.",
+      "fix": "Clarify: 'Error responses include timestamp in ISO 8601 UTC format (e.g., 2026-11-27T10:30:00Z). Update ErrorBody interface in common/error-codes.ts if not already present.'"
+    },
+    {
+      "id": 11,
+      "severity": "NIT",
+      "title": "Frontend component mobile responsiveness breakpoint vague",
+      "location": "Frontend Design § PlayerStatsDisplay Component, pg. 9",
+      "description": "Design says 'mobile: one column, desktop: multi-column' but does not specify pixel breakpoint (768px? 640px?).",
+      "impact": "Minor; implementer will infer standard Tailwind breakpoints but explicit guidance is better.",
+      "fix": "Clarify: 'Use Tailwind breakpoints: mobile layout (default and sm:) for <768px; tablet/desktop (md: and up) for ≥768px.'"
+    }
+  ],
+  "verified_assumptions": [
+    "TypeScript strict mode enabled (tsconfig.base.json)",
+    "Error-codes.ts exists with compatible error response structure",
+    "Module structure follows existing pattern (subdirectories for dtos, repositories, validators, __tests__)",
+    "NestJS HttpModule available (@nestjs/axios)",
+    "Frontend components and hooks directories exist",
+    "Zod validation pattern used in existing controllers",
+    "NestJS dependency injection pattern standard across codebase"
+  ],
+  "unverified_assumptions": [
+    "Payment provider abstraction mirrors cricket-data pattern (not found in codebase)",
+    "HTTP client is NestJS HttpService (assumed by pattern, not explicit)",
+    "1-hour TTL sufficient for player stats (not verified against ESPN/cricapi update frequency)",
+    "Match info updates less frequently than player stats (assumption without data)",
+    "ESPN/cricapi provides stats grouped by format (TEST, ODI, T20, DOMESTIC) as assumed",
+    "60+ test cases achievable for module scope (not verified)",
+    "Provider credential validation at startup via ConfigModule validation (design states, not shown)"
+  ]
+}

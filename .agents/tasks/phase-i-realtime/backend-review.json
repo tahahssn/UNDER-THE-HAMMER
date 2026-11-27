@@ -1,0 +1,24 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "id": "rate-limiting-not-ha-safe",
+      "title": "In-memory rate limiting not HA-safe",
+      "severity": "medium",
+      "description": "Chat rate limits (10 msgs/min) and presence data stored in-memory; both reset on restart. For distributed deployments, migrate to Redis or comparable store; for single-instance development, acceptable as-is. Document this constraint in deployment guide."
+    },
+    {
+      "id": "role-sync-gap-presence-recovery",
+      "title": "Role sync gap in presence recovery",
+      "severity": "low",
+      "description": "PresenceService recovers presence from AuctionParticipantConnection on restart but must fetch role/teamId from RoomMember table because those fields aren't stored in the connection record. If a user is removed from RoomMember between disconnect and recovery, their presence reappears with role SPECTATOR (fallback). Unlikely in normal operations but worth noting: role data should be persisted in AuctionParticipantConnection for consistency."
+    },
+    {
+      "id": "chat-held-status-not-fully-wired",
+      "title": "Chat message held status not fully wired",
+      "severity": "low",
+      "description": "RoomChatService.getHeldMessages() currently filters by VISIBLE status but schema supports HELD and REMOVED statuses. Comment acknowledges schema needs a column to track held vs visible at database level. Current implementation works (held messages stored with status='HELD') but the getHeldMessages query needs updating once schema is fixed to properly filter held-only messages for moderation queue."
+    }
+  ],
+  "reviewDoc": "d:\\UNDER-THE-HAMMER\\.agents\\tasks\\phase-i-realtime\\backend-review.md"
+}

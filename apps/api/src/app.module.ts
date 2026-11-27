@@ -19,6 +19,7 @@ import { TournamentsModule } from './tournaments/tournaments.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { RoomInvitationsModule } from './room-invitations/room-invitations.module';
 import { AuctionsModule } from './auctions/auctions.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { AuctionsModule } from './auctions/auctions.module';
     RoomsModule,
     RoomInvitationsModule,
     AuctionsModule,
+    NotificationsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

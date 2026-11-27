@@ -1,0 +1,100 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "summary": "Design is comprehensive but has 2 HIGH findings and 1 MEDIUM finding that must be resolved before implementation.",
+  "findings": [
+    {
+      "id": "HIGH_1",
+      "severity": "HIGH",
+      "title": "Dependencies Not Actually Added to package.json",
+      "location": "Design section: Dependency Updates",
+      "problem": "Design specifies adding papaparse and exceljs to apps/api/package.json, but verification shows neither package is currently in the actual package.json. Unclear whether this is aspirational or if implementation should assume they already exist.",
+      "impact": "Implementation will fail at runtime if dependencies are not installed before proceeding.",
+      "fix": "Either (A) confirm dependencies already exist and update design to reflect assumption, or (B) add explicit pre-implementation step to install both packages: `npm install papaparse@^5.4.1 exceljs@^4.4.0`",
+      "fixDetail": "Choose Option B: Add dependency installation as the first backend setup step. Include explicit npm ls verification after installation."
+    },
+    {
+      "id": "HIGH_2",
+      "severity": "HIGH",
+      "title": "Export Endpoint Route Not Defined in Controller",
+      "location": "Design section: Backend Endpoint: ExportController",
+      "problem": "Design specifies GET /v1/auctions/:auctionId/export endpoint, but verification of auctions.controller.ts shows this route does not exist. This is expected (design → implementation), but must be explicitly acknowledged as an implementation requirement.",
+      "impact": "Without clarity, implementer may miss adding this endpoint, leading to incomplete feature.",
+      "fix": "Add explicit endpoint registration checklist to design's implementation section. Specify the exact @Get() decorator and method signature to be added to AuctionsController.",
+      "fixDetail": "Create a 'Implementation Checklist' section that lists: (1) Add SquadExportService to AuctionsModule.providers, (2) Inject SquadExportService into AuctionsController, (3) Add @Get(':auctionId/export') method with exact signature."
+    },
+    {
+      "id": "MEDIUM_1",
+      "severity": "MEDIUM",
+      "title": "Unverified Database Query Strategy — Index Assumptions",
+      "location": "Design section: Database Query Strategy, index claims",
+      "problem": "Design claims 'No new indexes required. Export query uses existing indexes for fast joins.' However, indexes for PlayerAcquisition, SquadValidation, and SquadViolation were not fully verified against the actual schema. If indexes are missing, export query will perform poorly.",
+      "impact": "Export response time may exceed 1-second target if indexes are not present. Performance regression during implementation.",
+      "fix": "Add pre-implementation database verification step. Explicitly check that required indexes exist in schema before writing the export query. If any are missing, add them.",
+      "fixDetail": "Create 'Pre-Implementation Database Check' section that runs grep on schema to verify: (1) PlayerAcquisition.auctionTeamId index, (2) SquadValidation.[auctionTeamId, createdAt] index, (3) SquadViolation.auctionTeamId index. If missing, provide exact schema additions and migration command."
+    },
+    {
+      "id": "NIT_1",
+      "severity": "NIT",
+      "title": "Filename Sanitization Edge Case: Empty String",
+      "location": "Design section: Filename Sanitization",
+      "problem": "Sanitization function does not handle the case where input becomes empty after removing special characters. E.g., input '@#$%' becomes '_' or empty. No fallback specified.",
+      "impact": "Low. Edge case would only occur if auction name contains no alphanumeric characters, which is unlikely.",
+      "fix": "Add fallback logic: if sanitized filename is empty or only underscores, use default 'export'. Updated function:\n\nlet sanitized = input.replace(/[^\\w\\s\\-.]/g, '_');\nsanitized = sanitized.replace(/[\\s_]+/g, '_').trim().replace(/^_|_$/g, '');\nif (!sanitized) sanitized = 'export';\nreturn sanitized.substring(0, 200);",
+      "fixDetail": "Include this exact function in the final design specification."
+    },
+    {
+      "id": "NIT_2",
+      "severity": "NIT",
+      "title": "Missing MIME Type Charset Documentation for CSV",
+      "location": "Design section: Backend Endpoint, response headers",
+      "problem": "Design specifies text/csv with UTF-8, but does not explicitly document how to verify UTF-8 encoding or test with non-ASCII characters (e.g., Urdu names for Pakistani players).",
+      "impact": "Low. Implementation should work correctly, but test coverage for non-ASCII is not documented.",
+      "fix": "Add a note documenting: (1) papaparse defaults to UTF-8 encoding, (2) test case should include non-ASCII names, (3) file command verification step.",
+      "fixDetail": "Create subsection 'CSV Encoding Requirement' specifying UTF-8 handling and providing an example test with non-ASCII characters."
+    },
+    {
+      "id": "NIT_3",
+      "severity": "NIT",
+      "title": "Team Owner Username Fallback Not Specified",
+      "location": "Design section: Backend Service, field serialization",
+      "problem": "Design falls back to 'User {id}' when username is null, but does not discuss whether email should be tried first. No explicit guidance on the fallback chain.",
+      "impact": "Low. Fallback logic is reasonable but not fully specified. Could result in poor UX if users have no username.",
+      "fix": "Document the fallback chain: (1) username if present, (2) email if username null, (3) 'User {userId}' if both null.",
+      "fixDetail": "Add code example showing the ternary chain for owner display selection."
+    },
+    {
+      "id": "NIT_4",
+      "severity": "NIT",
+      "title": "Missing Test Categories",
+      "location": "Design section: Testing Strategy",
+      "problem": "Design specifies 45+ tests but does not include: concurrent exports, large auctions (1000+ players), non-ASCII characters, timestamp collision handling, or auction state changes during export.",
+      "impact": "Low. Test coverage would be comprehensive without these, but they are valuable edge cases.",
+      "fix": "Add these test categories to the testing matrix.",
+      "fixDetail": "Create new test category: 'Edge Cases — Advanced Scenarios (5+ tests)' with concurrent exports, non-ASCII names, large auctions, and timestamp collisions."
+    },
+    {
+      "id": "NIT_5",
+      "severity": "NIT",
+      "title": "Missing UUID Parameter Validation",
+      "location": "Design section: Backend Endpoint, route handler",
+      "problem": "Design does not explicitly validate auctionId as a UUID before passing to service. Validation happens at database level, but explicit validation is clearer.",
+      "impact": "Low. Database will return 404, but explicit UUID validation provides better error messages.",
+      "fix": "Add UUIDPipe to @Param decorator: @Param('auctionId', UUIDPipe).",
+      "fixDetail": "Import UUIDPipe from @nestjs/common and apply to auctionId parameter."
+    }
+  ],
+  "highCount": 2,
+  "mediumCount": 1,
+  "nitCount": 5,
+  "verifiedAssumptions": [
+    "Authorization model is sound and verifiable against schema (Auction.hostId, TeamOwner join structure)",
+    "Error response format matches NestJS standards",
+    "BigInt serialization strategy is correct (all monetary fields are BigInt in schema)",
+    "Frontend component and hook integration locations are valid",
+    "Shared contracts pattern is consistent with existing project structure"
+  ],
+  "unverifiedAssumptions": [
+    "Database query will be optimal (depends on indexes existing, Prisma query generation, DB planner)",
+    "File download works consistently on all mobile browsers (trade-off acknowledged in design)"
+  ]
+}

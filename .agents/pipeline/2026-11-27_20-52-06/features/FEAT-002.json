@@ -1,0 +1,38 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Backend API Endpoints & Authorization. Implements PaymentsController with checkout and webhook endpoints (POST /v1/subscriptions/checkout/:planId for checkout, POST /v1/payments/webhook/safepay for webhooks). Enhances SubscriptionsController with subscription management endpoints (GET /v1/subscriptions/plans public cached, GET /v1/subscriptions/current, GET /v1/subscriptions/entitlements, GET /v1/subscriptions/invoices paginated, POST /v1/subscriptions/:id/cancel). All endpoints include proper authorization guards (@CurrentUser for auth, @Permission for staff). Error responses follow HTTP semantics (401 for auth failures, 400 for client errors, 403 for authorization, 503 for service unavailable). Webhook endpoint returns 202 for all retriable conditions per SafePay expectations. Includes integration tests for authorization boundaries, state transitions, and subscription gating on room creation.",
+  "status": "pending",
+  "steps": [
+    "Create apps/api/src/payments/payments.module.ts: NestJS module that imports PaymentsRepository, SafepayService, and exports PaymentsController. Configure any required providers (ConfigService, LoggerService, PrismaService).",
+    "Create apps/api/src/payments/payments.controller.ts: Implement endpoints (1) POST /v1/subscriptions/checkout/:planId — @Post('checkout/:planId'), @UseGuards(JwtAuthGuard), call SafepayService.createCheckoutSession, return { checkoutUrl, sessionId, paymentId }. Error handling: 400 on invalid planId, 503 on SafePay unavailable. (2) POST /v1/payments/webhook/safepay — @Post('webhook/safepay'), no auth guard (signature verified instead), call SafepayService.processWebhook, return { acknowledged: true } with 202 on processing error. Rate limit: 10 req/min per user for checkout, 100 req/min per IP for webhook (use custom rate-limit guard if available, else document as Phase M).",
+    "Enhance apps/api/src/subscriptions/subscriptions.controller.ts with endpoints: (1) GET /v1/subscriptions/plans — public (no auth), returns active plans with entitlements, response cached 5 min via @Cacheable or manual caching. (2) GET /v1/subscriptions/current — @UseGuards(JwtAuthGuard), call SubscriptionsService.getActiveSubscription, return Subscription or null. (3) GET /v1/subscriptions/entitlements — @UseGuards(JwtAuthGuard), return user's current subscription entitlements (hostingEnabled, maxActiveRooms, maxTeamsPerRoom, maxSpectatorsPerRoom) or restrictive defaults. (4) GET /v1/subscriptions/invoices — @UseGuards(JwtAuthGuard), pagination params (skip=0, take=10), call SubscriptionsService.getInvoices(userId, skip, take), return paginated invoices. (5) POST /v1/subscriptions/:id/cancel — @UseGuards(JwtAuthGuard), verify ownership (current user === subscription.userId, else 403), call SubscriptionsService.cancelSubscription, return 204 No Content.",
+    "Verify room-creation integration: Check apps/api/src/rooms/rooms.controller.ts uses @SubscriptionGuard which calls canUserHost(). If guard not present, add it. Test: attempt room creation without subscription → 403 'Active subscription required'. After checkout and webhook success → room creation allowed.",
+    "Create apps/api/src/payments/payments.integration.spec.ts: Integration tests covering (1) checkout flow: POST /checkout/:planId succeeds with valid plan, returns checkoutUrl, 400 on invalid planId, 503 on SafePay API error. (2) idempotency: duplicate checkout with same idempotencyKey returns same checkoutUrl without duplicate Payment record. (3) webhook success: webhook_payment_success event creates Subscription, Payment.status=PAID, Invoice created, canUserHost now returns true. (4) webhook authorization: invalid signature returns 401, valid signature processes event. (5) webhook replay: duplicate webhook (same providerEventId) returns 202 immediately without processing. (6) subscription endpoints: GET /current returns active subscription, GET /plans returns all active plans, GET /entitlements returns limits, POST /cancel sets cancelAtPeriodEnd flag. (7) ownership/authorization: user A cannot view/cancel user B's subscription (403).",
+    "Enhance apps/api/src/subscriptions/subscriptions.integration.spec.ts: Add tests for (1) room hosting eligibility: user without subscription cannot create room (403), user with active subscription can create room. (2) subscription cancellation: POST /cancel sets cancelAtPeriodEnd=true, canUserHost still true until period end. (3) invoice retrieval: GET /invoices returns paginated invoices with correct amounts (paisa displayed as PKR)."
+  ],
+  "acceptance_criteria": [
+    "POST /v1/subscriptions/checkout/:planId creates Payment record with planId set, calls SafePay API, returns checkoutUrl and sessionId",
+    "Duplicate checkout requests with same idempotencyKey return cached response without new Payment record or SafePay API call",
+    "POST /v1/payments/webhook/safepay validates webhook signature (401 on invalid), processes event transactionally, returns 202 on processing error for SafePay retry",
+    "Webhook replay detection: duplicate webhook (same providerEventId) acknowledged immediately (202) without processing",
+    "GET /v1/subscriptions/plans public endpoint returns active plans, cached 5 minutes",
+    "GET /v1/subscriptions/current authenticated, returns current active subscription or null",
+    "GET /v1/subscriptions/entitlements returns user's subscription limits or restrictive defaults",
+    "GET /v1/subscriptions/invoices paginated, returns invoices with dates, amounts (formatted in PKR), and links",
+    "POST /v1/subscriptions/:id/cancel sets cancelAtPeriodEnd flag, returns 204",
+    "Authorization verified: user cannot view/cancel another user's subscription (403), all endpoints enforce @CurrentUser()",
+    "Room creation requires active subscription (uses @SubscriptionGuard), 403 if no subscription",
+    "Integration tests pass for all authorization boundaries and state transitions"
+  ],
+  "verification": [
+    "npm run build succeeds for api and contracts packages",
+    "npm run typecheck passes",
+    "npm run test -- payments.integration.spec subscriptions.integration.spec passes",
+    "Manual test: checkout flow end-to-end (create checkout → redirect to SafePay → webhook processes → subscription activated → user can create room)",
+    "Manual test: authorization (user A tries to cancel user B's subscription → 403)",
+    "Manual test: webhook replay (send same webhook twice → first processes, second returns 202 without duplicate subscription)"
+  ],
+  "blocked_reason": null,
+  "findings": "Depends on FEAT-001 (SafepayService, PaymentsRepository, Payment schema). Rate limiting (10 req/min per user for checkout) may require custom guard or Phase M implementation if not available. Plan list caching (5 min) can use @Cacheable decorator if available, or manual TTL cache."
+}

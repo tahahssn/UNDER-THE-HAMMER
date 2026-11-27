@@ -1,0 +1,132 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "title": "X-Data-Source Header Implementation Gap",
+      "location": "cricket-data.controller.ts (lines 72-79)",
+      "problem": "Design acknowledges NestJS header control limitation but provides incomplete workaround. States 'include in response body' instead of fulfilling requirement to set X-Data-Source HTTP header.",
+      "impact": "Frontend cannot distinguish stale data via HTTP headers; breaks design contract for header-based behavior.",
+      "fix": "Specify header mechanism explicitly using @Header() decorator, interceptor, or middleware. Document concrete implementation pattern."
+    },
+    {
+      "id": 2,
+      "severity": "HIGH",
+      "title": "Search Results Caching Consistency Undefined",
+      "location": "Requirements 3.1 vs Design 2.1 CricketDataService",
+      "problem": "Requirements state search results cached 1 hour per query string; design states 'no caching at this level' for CricketDataService. Neither PlayerStatsService nor LiveMatchService handles search caching.",
+      "impact": "Search endpoint will not respect 1-hour TTL and query-based cache keys; implementation team must invent own strategy.",
+      "fix": "Either add SearchResultsService with 1-hour TTL and query-hashed cache keys, or clarify search is not cached and update requirements."
+    },
+    {
+      "id": 3,
+      "severity": "HIGH",
+      "title": "Admin Cache Invalidation Endpoints Missing",
+      "location": "Design section 4.1; Admin endpoints deferred",
+      "problem": "Design mentions admin endpoint DELETE /v1/admin/cricket-data/cache/{cacheType}/:key but provides no implementation. Marked as 'future phase' but API endpoints are Phase M scope.",
+      "impact": "No manual invalidation mechanism for stale cached data. Users must wait up to 1 hour for fixes.",
+      "fix": "Either add complete admin endpoint implementation (controller, service, authorization, audit log) or explicitly move cache invalidation to Out of Scope."
+    },
+    {
+      "id": 4,
+      "severity": "HIGH",
+      "title": "ProviderError Class Violates Project Error Pattern",
+      "location": "provider.error.ts; app-exception.ts (codebase standard)",
+      "problem": "Design introduces custom ProviderError class instead of using project standard AppException with ErrorCode enum. Violates AGENTS.md mandate for consistent error codes.",
+      "impact": "Error handling is fragmented; monitoring/logging of error codes incomplete. Future modules will not know which pattern to follow.",
+      "fix": "Change ProviderError to extend AppException with ErrorCode values, or keep as data class and throw AppException directly in controller."
+    },
+    {
+      "id": 5,
+      "severity": "HIGH",
+      "title": "Financial/Currency Strategy Unspecified for Integer-Minor-Unit Requirement",
+      "location": "PlayerStatsDto DTOs with numeric fields (runs, battingAverage, strikeRate)",
+      "problem": "AGENTS.md mandates never use floating-point for money; design does not specify if stats floats are display-only or could propagate into financial calculations.",
+      "impact": "If stats floats are used in future bid-increment calculations, floating-point will propagate into financial operations, violating mandate.",
+      "fix": "Clarify in design that stats DTOs are display-only floats; monetary values will use integer minor units in auction module."
+    },
+    {
+      "id": 6,
+      "severity": "MEDIUM",
+      "title": "Rate Limiter Thread-Safety Assumption",
+      "location": "rate-limiter.ts checkAndWait() method",
+      "problem": "Simple array filtering is not thread-safe. Concurrent requests may both see same window state and exceed maxRequests limit.",
+      "impact": "Rate limiter may not enforce limits correctly under concurrent load.",
+      "fix": "Add note documenting single-instance suitability. For distributed systems, recommend Redis-based rate limiting or add concurrency lock."
+    },
+    {
+      "id": 7,
+      "severity": "MEDIUM",
+      "title": "Search Results Response Schema Inconsistency",
+      "location": "Requirements 3.1 response schema vs controller implementation",
+      "problem": "total field computed as results.length, not from provider. If provider limits results, total will show 20 (not 1000) even if provider has more matches.",
+      "impact": "Clients cannot determine if more results are available; frontend shows incorrect totals.",
+      "fix": "Either add totalMatches/hasMore to PlayerSearchResult DTO, or clarify that total is returned items count, not provider database total."
+    },
+    {
+      "id": 8,
+      "severity": "MEDIUM",
+      "title": "Cache Key Collision Risk with Multiple Providers",
+      "location": "Cache key format: cricket:player-stats:{playerId}",
+      "problem": "Design allows multiple providers in future but cache keys do not namespace by provider. Stats from ESPN could be returned for cricapi queries.",
+      "impact": "Silent data inconsistency if multiple providers used with same player IDs.",
+      "fix": "Include provider name in cache keys: cricket:stats:{providerName}:{playerId}"
+    },
+    {
+      "id": 9,
+      "severity": "MEDIUM",
+      "title": "forceRefresh Logic Ambiguity in PlayerStatsService",
+      "location": "player-stats.service.ts lines 20-28",
+      "problem": "forceRefresh=true bypasses cache on read and updates on success, but on error leaves stale cache untouched. Ambiguous behavior creates inconsistency.",
+      "impact": "Stale data may be returned on next call without forceRefresh if initial forceRefresh failed during outage.",
+      "fix": "Explicitly document: either 'return stale on forceRefresh failure' or 'return error on forceRefresh failure'."
+    },
+    {
+      "id": 10,
+      "severity": "MEDIUM",
+      "title": "LiveMatchService 15-Minute TTL May Be Outdated During Live Matches",
+      "location": "live-match.service.ts CACHE_TTL_MS = 900000 (15 minutes)",
+      "problem": "Live matches update every 10–30 seconds; 15-minute cache serves extremely stale data (scores, wickets, status outdated).",
+      "impact": "Live match information will be significantly delayed, violating freshness requirement.",
+      "fix": "Reduce TTL to 2–5 minutes for live matches, or document separate handling for live vs completed/scheduled matches."
+    },
+    {
+      "id": 11,
+      "severity": "MEDIUM",
+      "title": "ZodValidationPipe Error Response Format Unspecified",
+      "location": "cricket-data.controller.ts routes with ZodValidationPipe",
+      "problem": "Design does not specify HTTP status or response body format when Zod validation fails (e.g., missing required query param).",
+      "impact": "Frontend cannot reliably handle validation errors; uncertain error response shape.",
+      "fix": "Add note: 'Zod validation errors caught by http-exception.filter.ts; clients expect HTTP 400 with error body containing code and details.'"
+    },
+    {
+      "id": 12,
+      "severity": "MEDIUM",
+      "title": "Mock Implementation Requirements for Testing Are Incomplete",
+      "location": "Testing Strategy section (40+ unit, 15 integration, 5 E2E tests)",
+      "problem": "Design specifies test counts but not mocking approach: should provider use axios-mock-adapter or real calls? Should Redis use ioredis-mock?",
+      "impact": "Implementation team guesses at testing strategy; tests may be slow/flaky if mocking not pre-defined.",
+      "fix": "Add testing section specifying: axios-mock-adapter for provider, ioredis-mock for Redis, concurrent Promise.all() for rate limiter tests."
+    },
+    {
+      "id": 13,
+      "severity": "MEDIUM",
+      "title": "Frontend Hook Missing Error Recovery Mechanism",
+      "location": "useCricketData.ts catch block (line 48)",
+      "problem": "Hook has no autoRetry or exponential backoff for transient network errors. Only manual refetch() available; will fail immediately if network is still down.",
+      "impact": "Frontend has no graceful retry; users must manually click 'Retry' or refresh page.",
+      "fix": "Either add autoRetry parameter with exponential backoff, or document that frontend caller is responsible for retry logic."
+    }
+  ],
+  "summary": {
+    "total_findings": 13,
+    "high_count": 5,
+    "medium_count": 8,
+    "nit_count": 0,
+    "verified_assumptions": 8,
+    "unverified_assumptions": 5,
+    "decision": "5 HIGH findings require resolution before implementation. Design architecture is sound but contains specification gaps and inconsistencies."
+  },
+  "estimated_fix_effort_days": "2-3"
+}

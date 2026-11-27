@@ -1,0 +1,11 @@
+{
+  "task_id": "task-phase-l-subscriptions-payments",
+  "task_description": "Implement host subscription entitlements and payment processing using SafePay checkout sessions and webhooks. Backend enforces subscription gating for room hosting, creates immutable financial audit trail, and handles payment success/failure/refund workflows with idempotency and webhook reliability. Frontend provides pricing, checkout, and billing management pages.",
+  "status": "pending",
+  "feature_order": [
+    "FEAT-001",
+    "FEAT-002",
+    "FEAT-003"
+  ],
+  "blocked_reason": null
+}

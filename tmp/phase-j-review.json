@@ -1,0 +1,12 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "reviewDoc": "/tmp/phase-j-review.md",
+  "findings": [
+    {
+      "level": "HIGH",
+      "section": "Document existence / review precondition",
+      "finding": "The specification to review does not exist. The exact path d:\\UNDER-THE-HAMMER\\.agents\\tasks\\phase-j-live-auction-frontend-spec.md is absent (Test-Path False), and a repository-wide search found no file matching phase-j*, phase_j*, or live-auction*. The tasks folder contains only phase-d through phase-i artifacts. The only Phase J document, .agents\\PHASE_I_COMPLETION_AND_PHASE_J_LAUNCH.md, is a launch brief that records Phase J as still in the 'Planning phase', confirming the spec was never authored at the review location.",
+      "suggestion": "Author the Phase J spec and save it at d:\\UNDER-THE-HAMMER\\.agents\\tasks\\phase-j-live-auction-frontend-spec.md (or correct the review step's input path if the spec was written elsewhere). It must cover component prop types and state transitions for BidPlacementForm/BidHistory/PlayerIntroduction/TeamStandings/RealTimeStats/BidPlacementError; hook signatures for useBidPlacement/useAuctionRealTime/useAuctionState with each event bound to its concrete Phase I gateway event; handling for all eight realtime events (BID_ACCEPTED, BID_REJECTED, PLAYER_INTRODUCED, PLAYER_SOLD, BREAK_STARTED, BREAK_ENDED, SQUAD_UPDATED, PRESENCE_UPDATE); Phase G bid error-code to user-message mapping; 375/768/1024/1440 breakpoint behavior; WCAG AA keyboard/focus/contrast rules; >80% test scope with E2E and responsive tests; an explicit no-hardcoded-values rule sourcing team count/purse/categories/increments from room state; optimistic-update reconciliation, idempotency-key handling, and reconnect state fetch; and integration with the Phase H break overlay and Phase I useRoomChat/usePresence/useBreakSocket hooks. Then re-run this review against the authored document."
+    }
+  ]
+}

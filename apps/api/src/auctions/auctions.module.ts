@@ -15,6 +15,7 @@ import { AuctionSnapshotService } from './services/auction-snapshot.service';
 import { BreakManagerService } from './services/break-manager.service';
 import { SquadValidatorService } from './services/squad-validator.service';
 import { SquadsService } from './services/squads.service';
+import { SquadExportService } from './services/squad-export.service';
 import { CountdownService } from './services/countdown.service';
 import { TurnBasedEngineService } from './services/turn-based-engine.service';
 import { RoomChatService } from './services/room-chat.service';
@@ -45,6 +46,7 @@ import { RoomsModule } from '../rooms/rooms.module';
     BreakManagerService,
     SquadValidatorService,
     SquadsService,
+    SquadExportService,
     CountdownService,
     TurnBasedEngineService,
     RoomChatService,

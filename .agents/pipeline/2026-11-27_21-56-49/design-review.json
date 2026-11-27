@@ -1,0 +1,104 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "title": "Missing Dependency Version Strategy and Package Availability",
+      "location": "Section 2 (Technology Stack), Section 3.3 (Cache Implementation)",
+      "description": "Design references ioredis or redis npm packages but neither is installed in apps/api/package.json. No version pinning strategy or justification for package choice is documented.",
+      "impact": "Implementer must guess which library to use; potential for unresolved transitive dependencies or version conflicts.",
+      "concrete_fix": "Explicitly pin 'ioredis@^5.3.0' in apps/api/package.json with rationale: 'Official maintainer, TypeScript support, connection pooling for NestJS.' Document decision in design Section 2."
+    },
+    {
+      "id": 2,
+      "severity": "HIGH",
+      "title": "Undefined CricketDataConfig Type and Configuration Flow",
+      "location": "Section 3.1, 3.2, 3.4, 3.7, 3.8",
+      "description": "Design references CricketDataConfig in multiple places (service constructors, module factory) but never defines the type. No interface, no relation to envSchema, no DI strategy documented.",
+      "impact": "Service and module instantiation will fail at runtime; DI resolution incomplete; config flow is broken.",
+      "concrete_fix": "Define CricketDataConfig interface in cricket-data/types/cricket-data.types.ts. Add toCricketDataConfig(env: Env) function to map environment variables to config. Add provider in cricket-data.module.ts using useFactory. Update Section 3.8 to show the complete config flow."
+    },
+    {
+      "id": 3,
+      "severity": "HIGH",
+      "title": "Unvalidated Assumption: Player ID 1:1 Mapping Without Error Handling",
+      "location": "Section 3.5 (PlayerStatsService), Assumptions #3",
+      "description": "Design assumes database player IDs match provider IDs directly, with no mapping table or cross-validation. If IDs diverge (e.g., 'player-uuid-123' in DB vs 'espn-456' in provider), the endpoint silently falls back to stale cache with no actionable error message.",
+      "impact": "Runtime errors masked by generic 'Provider unavailable' message. User cannot distinguish between provider actually down vs. player not found in provider. Silent data corruption or missing stats.",
+      "concrete_fix": "Add error handling in PlayerStatsService.getPlayerStats(): catch CricketDataError with code INVALID_PLAYER and return database stats only (graceful degradation). Log with 'Provider does not have stats for player X; returning database metadata only'. Document that 1:1 mapping is assumed; ProviderPlayerMapping table is future work. Add test case for player found in DB but not in provider."
+    },
+    {
+      "id": 4,
+      "severity": "MEDIUM",
+      "title": "Ambiguous Rate-Limit Backoff Coordination in Clustered Deployments",
+      "location": "Section 3.4 (CricketDataService), Section 8 (Edge Cases), Requirements Notes",
+      "description": "Design stores rate-limit state in in-memory Map, which is not shared across API instances. Each instance independently detects rate-limits, causing duplicate retry storms at scale.",
+      "impact": "In production with N instances, provider receives N*3 retry attempts on rate-limit, risking provider account suspension. Acknowledged in Requirements but not solved in design.",
+      "concrete_fix": "Reuse CacheService (Redis or memory) for rate-limit coordination: check rateLimitCache.exists(rateLimitKey) before calling provider; on 429, store in rateLimitCache with TTL matching X-RateLimit-Reset. Document: 'Rate-limit backoff is shared across instances via Redis cache; in-memory cache provides per-instance tracking in development.'"
+    },
+    {
+      "id": 5,
+      "severity": "MEDIUM",
+      "title": "Stale Cache Data Age Is Never Communicated to Frontend",
+      "location": "Section 4.1 (useCricketData Hook), Section 4.2 (PlayerStats Component), Requirements 8.3",
+      "description": "Backend returns isCached: true but does not indicate how stale the data is. Frontend component cannot distinguish between 1-minute-old cache and 23-hour-old stale fallback.",
+      "impact": "User sees 'Cached • 2 hours ago' and cannot tell if data is recent or dangerously stale. Requirement 8.3 to 'display stale-data warning' is unimplementable.",
+      "concrete_fix": "Add fields to CacheMetadata: ageSeconds (time since fetch), isStale (true if expired cache). Backend populates when returning stale cache. Frontend displays 'Warning: Data is 5 hours old' badge when isStale=true and ageSeconds > threshold (e.g., 1800s)."
+    },
+    {
+      "id": 6,
+      "severity": "MEDIUM",
+      "title": "No Error Recovery for Malformed Provider Responses",
+      "location": "Section 3.2 (ESPNDataProvider), mapEspnStats function",
+      "description": "Design maps ESPN responses with no validation or schema enforcement. Malformed responses (missing playerId, invalid format) are cached as-is, causing frontend errors.",
+      "impact": "Invalid or partial data corrupts the cache and frontend rendering. No clear error message or fallback.",
+      "concrete_fix": "Add Zod validation schema for ESPN responses (espnPlayerStatsSchema). Validate before mapping. Throw CricketDataError with code PROVIDER_ERROR on validation failure. Document: 'All provider responses are validated against a schema before caching; malformed responses are treated as PROVIDER_ERROR and trigger fallback.'"
+    },
+    {
+      "id": 7,
+      "severity": "MEDIUM",
+      "title": "Module Factory Does Not Validate CricketDataConfig at Startup",
+      "location": "Section 3.7 (Module Registration)",
+      "description": "Module factory does not validate CricketDataConfig at application startup. Invalid configuration (bad URLs, unknown providers) fails lazily on first request.",
+      "impact": "App boots successfully with broken config; errors occur only when cricket data is first accessed, complicating debugging in production.",
+      "concrete_fix": "Add validateCricketConfig(config) function; call in module onModuleInit() lifecycle hook. Validate: provider name is known, URLs are valid, TTL values are reasonable. Fail fast with clear error message."
+    },
+    {
+      "id": 8,
+      "severity": "NIT",
+      "title": "RateLimitInfo Type Is Never Defined",
+      "location": "Section 3.4 (CricketDataService), private rateLimitState: Map<string, RateLimitInfo>",
+      "description": "RateLimitInfo type is referenced but not defined in the design.",
+      "impact": "Implementation cannot create RateLimitInfo objects; TypeScript compilation fails.",
+      "concrete_fix": "Define RateLimitInfo interface in cricket-data/types/cricket-data.types.ts: { retryCount: number; nextRetryAt: Date; resetAt?: Date; endpointUrl: string }"
+    },
+    {
+      "id": 10,
+      "severity": "NIT",
+      "title": "ESPNDataProvider isHealthy() Implementation Details Missing",
+      "location": "Section 3.2 (ESPNDataProvider), isHealthy() method",
+      "description": "Design requires isHealthy() method but does not specify what constitutes a healthy provider or how to check.",
+      "impact": "Implementer must guess; may implement inefficient or incorrect health checks.",
+      "concrete_fix": "Document: 'isHealthy() attempts a lightweight HEAD request to {baseUrl}/status with 5s timeout. Returns true if status is 2xx; false otherwise. If ESPN does not expose /status, check with a known player search query.'"
+    },
+    {
+      "id": 11,
+      "severity": "NIT",
+      "title": "SearchPlayers Pagination Offset Parameter Not Documented",
+      "location": "Requirements 5.3, Design Section 4.3 (CricketSearch component)",
+      "description": "Component increments offset by fixed limit (10) but does not handle user-configurable limit. Future-proofing unclear.",
+      "impact": "If limit is later made configurable, pagination breaks.",
+      "concrete_fix": "Document: 'Pagination is controlled by offset and limit parameters. limit is fixed at 10 for initial CricketSearch component (future: make configurable). offset is incremented by limit on Load more. Results include hasMore flag to disable Load more when at end.'"
+    }
+  ],
+  "statistics": {
+    "total_findings": 9,
+    "high_severity": 3,
+    "medium_severity": 4,
+    "nit_severity": 2,
+    "blocking_issues": 3,
+    "verified_assumptions": 7,
+    "unverified_assumptions": 3
+  }
+}

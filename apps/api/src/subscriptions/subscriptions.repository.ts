@@ -104,4 +104,51 @@ export class SubscriptionsRepository {
       select: { intValue: true, boolValue: true },
     });
   }
+
+  /**
+   * Update subscription cancelAtPeriodEnd flag
+   */
+  async updateSubscriptionCancelAtPeriodEnd(subscriptionId: string, cancelAtPeriodEnd: boolean) {
+    return this.prisma.subscription.update({
+      where: { id: subscriptionId },
+      data: { cancelAtPeriodEnd },
+      include: {
+        plan: {
+          include: {
+            entitlements: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Get user's invoices with pagination
+   */
+  async getUserInvoices(userId: string, skip: number, take: number) {
+    const [items, total] = await Promise.all([
+      this.prisma.invoice.findMany({
+        where: {
+          payment: {
+            userId,
+          },
+        },
+        include: {
+          payment: true,
+        },
+        orderBy: { issuedAt: 'desc' },
+        skip,
+        take,
+      }),
+      this.prisma.invoice.count({
+        where: {
+          payment: {
+            userId,
+          },
+        },
+      }),
+    ]);
+
+    return { items, total };
+  }
 }

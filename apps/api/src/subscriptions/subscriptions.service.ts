@@ -158,4 +158,36 @@ export class SubscriptionsService {
     const e = entitlements.find((x) => x.key === key);
     return e?.boolValue ?? defaultValue;
   }
+
+  /**
+   * Get active subscription for a user
+   */
+  async getActiveSubscription(userId: string) {
+    const subscription = await this.repo.getUserActiveSubscription(userId);
+    return subscription ? this.formatSubscription(subscription) : null;
+  }
+
+  /**
+   * Cancel a subscription (set cancelAtPeriodEnd flag)
+   */
+  async cancelSubscription(userId: string, subscriptionId: string) {
+    // Verify ownership
+    const subscription = await this.repo.getUserSubscriptions(userId, 0, 1);
+    const sub = subscription.items.find((s) => s.id === subscriptionId);
+
+    if (!sub) {
+      throw new Error('Subscription not found');
+    }
+
+    // Update to set cancelAtPeriodEnd flag
+    const updated = await this.repo.updateSubscriptionCancelAtPeriodEnd(subscriptionId, true);
+    return this.formatSubscription(updated);
+  }
+
+  /**
+   * Get invoices for a user with pagination
+   */
+  async getInvoices(userId: string, skip: number = 0, take: number = 20) {
+    return this.repo.getUserInvoices(userId, skip, take);
+  }
 }

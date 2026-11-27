@@ -1,7 +1,10 @@
-import { Controller, Post, Get, Put, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Param, Body, UseGuards, Query, Res, BadRequestException, ForbiddenException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { JwtGuard } from '../auth/jwt.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuctionsService } from './auctions.service';
+import { SquadExportService } from './services/squad-export.service';
+import { ExportFormat } from '@uth/contracts';
+import { Response } from 'express';
 import {
   CreateAuctionDtoSchema,
   StartAuctionDtoSchema,
@@ -15,7 +18,10 @@ import {
 @Controller('v1/auctions')
 @UseGuards(JwtGuard)
 export class AuctionsController {
-  constructor(private readonly auctionsService: AuctionsService) {}
+  constructor(
+    private readonly auctionsService: AuctionsService,
+    private readonly exportService: SquadExportService
+  ) {}
 
   @Post()
   async createAuction(
@@ -184,5 +190,55 @@ export class AuctionsController {
     @Param('auctionTeamId') auctionTeamId: string
   ) {
     return this.auctionsService.validateSquadRequirements(auctionId, auctionTeamId);
+  }
+
+  // ===== Squad Exports =====
+
+  @Get(':auctionId/export')
+  async exportSquad(
+    @Param('auctionId') auctionId: string,
+    @Query('format') format: string | undefined,
+    @CurrentUser('sub') userId: string,
+    @Res() res: Response
+  ) {
+    // Validate format parameter
+    if (!format) {
+      throw new BadRequestException('format query parameter is required (csv or xlsx)');
+    }
+
+    const normalizedFormat = format.toLowerCase();
+    if (!Object.values(ExportFormat).includes(normalizedFormat as ExportFormat)) {
+      throw new BadRequestException(`Invalid format. Allowed values: ${Object.values(ExportFormat).join(', ')}`);
+    }
+
+    const exportFormat = normalizedFormat as ExportFormat;
+
+    try {
+      if (exportFormat === ExportFormat.CSV) {
+        const csvContent = await this.exportService.exportSquadCsv(auctionId, userId);
+        const filename = this.exportService.generateFilename(auctionId, exportFormat);
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(csvContent);
+      } else if (exportFormat === ExportFormat.XLSX) {
+        const xlsxBuffer = await this.exportService.exportSquadXlsx(auctionId, userId);
+        const filename = this.exportService.generateFilename(auctionId, exportFormat);
+
+        res.setHeader(
+          'Content-Type',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(xlsxBuffer);
+      }
+    } catch (error) {
+      if (error instanceof BadRequestException || 
+          error instanceof ForbiddenException || 
+          error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to generate export');
+    }
   }
 }

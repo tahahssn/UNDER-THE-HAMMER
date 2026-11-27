@@ -8,6 +8,7 @@ import { ROUTES } from '@/lib/constants';
 import Button from './Button';
 import ProfileDropdown from './ProfileDropdown';
 import MobileNav from './MobileNav';
+import { NotificationBell } from './notifications/NotificationBell';
 
 export const Header: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -51,7 +52,10 @@ export const Header: React.FC = () => {
               {!isLoading && (
                 <>
                   {isAuthenticated ? (
-                    <ProfileDropdown />
+                    <>
+                      <NotificationBell />
+                      <ProfileDropdown />
+                    </>
                   ) : (
                     <div className="hidden sm:flex items-center gap-3">
                       <Link href={ROUTES.signIn}>
