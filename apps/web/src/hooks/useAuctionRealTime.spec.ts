@@ -44,12 +44,48 @@ describe('useAuctionRealTime', () => {
     renderHook(() => useAuctionRealTime('a1'));
     expect(socket._handlers['bid:accepted']).toBeDefined();
     expect(socket._handlers['bid:rejected']).toBeDefined();
+    // The gateway now broadcasts player:introduced so the next player advances live.
+    expect(socket._handlers['player:introduced']).toBeDefined();
     expect(socket._handlers['player:sold']).toBeDefined();
     expect(socket._handlers['break:started']).toBeDefined();
     expect(socket._handlers['room:snapshot']).toBeDefined();
-    // Events that Phase I never broadcasts are not relied upon for advancement.
-    expect(socket._handlers['player:introduced']).toBeUndefined();
+    // squad:updated is still not relied upon for advancement.
     expect(socket._handlers['squad:updated']).toBeUndefined();
+  });
+
+  it('requests a fresh snapshot when the next player is introduced', () => {
+    renderHook(() => useAuctionRealTime('a1'));
+    act(() => socket._emit('player:introduced', { auctionPlayerId: 'p2' }));
+    expect(socket.emit).toHaveBeenCalledWith('auction:request-snapshot', {
+      auctionId: 'a1',
+    });
+  });
+
+  it('maps the snapshot leading bid into the current player on reconcile', () => {
+    const { result } = renderHook(() => useAuctionRealTime('a1'));
+    act(() => {
+      socket._emit('room:snapshot', {
+        currentPlayerId: 'p5',
+        currentPlayer: {
+          id: 'p5',
+          name: 'Leader',
+          role: 'Bowler',
+          basePriceMinor: '1000000',
+        },
+        highBidMinor: '13500000',
+        highBidTeamId: 't2',
+        teams: [
+          { id: 't2', name: 'Peshawar', purseBalanceMinor: '5000000', acquisitions: [] },
+        ],
+        breakActive: false,
+      });
+    });
+    expect(result.current.currentPlayer?.leadingTeam).toEqual({
+      id: 't2',
+      name: 'Peshawar',
+      amountMinor: 13_500_000,
+    });
+    expect(result.current.currentPlayer?.basePriceMinor).toBe(1_000_000);
   });
 
   it('records an accepted bid and updates the leading team', () => {

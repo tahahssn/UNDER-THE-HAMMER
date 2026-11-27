@@ -209,6 +209,15 @@ export class AuctionRoomGateway implements OnGatewayConnection, OnGatewayDisconn
   }
 
   /**
+   * Broadcast that a new player has been introduced (set active). Clients
+   * reconcile the active player by requesting a fresh snapshot, so the next
+   * player advances live during the auction instead of only on reconnect.
+   */
+  broadcastPlayerIntroduced(auctionId: string, event: any) {
+    this.server.to(`auction:${auctionId}`).emit('player:introduced', event);
+  }
+
+  /**
    * Broadcast break started
    */
   broadcastBreakStarted(auctionId: string, durationSeconds: number) {

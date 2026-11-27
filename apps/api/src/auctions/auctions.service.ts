@@ -5,6 +5,7 @@ import { AuctionStateMachineService, AuctionPhase } from './services/auction-sta
 import { BidAcceptanceService } from './services/bid-acceptance.service';
 import { PlayerSelectionService } from './services/player-selection.service';
 import { AuctionEventStoreService } from './services/auction-event-store.service';
+import { AuctionEventBroadcasterService } from './services/auction-event-broadcaster.service';
 import { CountdownService } from './services/countdown.service';
 import { AUCTION_ERRORS } from './constants/auction-errors';
 
@@ -17,6 +18,7 @@ export class AuctionsService {
     private readonly bidAcceptance: BidAcceptanceService,
     private readonly playerSelection: PlayerSelectionService,
     private readonly eventStore: AuctionEventStoreService,
+    private readonly broadcaster: AuctionEventBroadcasterService,
     private readonly countdown: CountdownService
   ) {}
 
@@ -249,6 +251,13 @@ export class AuctionsService {
       selectionSource: 'MANUAL',
     });
 
+    // Broadcast live so connected clients advance to the new active player
+    // (they reconcile by requesting a fresh snapshot).
+    this.broadcaster.broadcastPlayerIntroduced(auctionId, {
+      auctionPlayerId: player.id,
+      selectionSource: 'MANUAL',
+    });
+
     return player;
   }
 
@@ -272,6 +281,13 @@ export class AuctionsService {
     await this.eventStore.recordEvent(auctionId, 'PLAYER_INTRODUCED', {
       playerId: player.id,
       selectedBy: userId,
+      selectionSource: 'AUTOMATIC',
+    });
+
+    // Broadcast live so connected clients advance to the new active player
+    // (they reconcile by requesting a fresh snapshot).
+    this.broadcaster.broadcastPlayerIntroduced(auctionId, {
+      auctionPlayerId: player.id,
       selectionSource: 'AUTOMATIC',
     });
 

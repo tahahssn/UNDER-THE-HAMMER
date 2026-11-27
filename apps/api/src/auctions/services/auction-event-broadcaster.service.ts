@@ -56,6 +56,15 @@ export class AuctionEventBroadcasterService {
   }
 
   /**
+   * Broadcast player introduced event (a new player becomes active)
+   */
+  broadcastPlayerIntroduced(auctionId: string, payload: any) {
+    if (this.gateway) {
+      this.gateway.broadcastPlayerIntroduced(auctionId, payload);
+    }
+  }
+
+  /**
    * Broadcast phase changed event
    */
   phaseChanged(auctionId: string, phase: string, stateVersion: number) {

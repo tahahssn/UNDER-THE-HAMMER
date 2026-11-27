@@ -16,6 +16,7 @@ import { OptimisticBid } from './useBidPlacement';
 export type AuctionEventType =
   | 'BID_ACCEPTED'
   | 'BID_REJECTED'
+  | 'PLAYER_INTRODUCED'
   | 'PLAYER_SOLD'
   | 'PLAYER_UNSOLD'
   | 'BREAK_STARTED'
@@ -72,14 +73,14 @@ function asMinor(value: unknown): number | null {
  * break state).
  *
  * Event alignment (Phase I gateway, confirmed against apps/api/src): the
- * backend emits `bid:accepted`, `bid:rejected`, `bid:error`, `player:sold`,
- * `break:started/ended`, `countdown:update`, `room:snapshot` and
- * `room:presence`. It does NOT emit `player:introduced`, `player:unsold` or
- * `squad:updated`. Because of that, the active player and squad counts are
- * advanced by requesting a fresh `room:snapshot` whenever a player is sold (and
- * on reconnect), rather than relying on a dedicated introduce/squad event. The
- * handlers for those not-yet-emitted events are kept, harmless and
- * forward-compatible, so the room upgrades automatically if Phase I adds them.
+ * backend emits `bid:accepted`, `bid:rejected`, `bid:error`, `player:introduced`,
+ * `player:sold`, `break:started/ended`, `countdown:update`, `room:snapshot` and
+ * `room:presence`. When the host introduces the next player the gateway now
+ * broadcasts `player:introduced`, so the active player advances live: we react
+ * by requesting a fresh `room:snapshot` (which reflects the newly set current
+ * player and its leading bid). We also re-snapshot on `player:sold` and on
+ * reconnect to refresh squad counts and purses. The `player:unsold` handler is
+ * kept as harmless forward-compat; the backend does not emit it yet.
  *
  * Optimistic bids registered via {@link addOptimisticBid} are reconciled
  * against accepted/rejected events by idempotency key (echoed by the gateway).
@@ -155,6 +156,26 @@ export function useAuctionRealTime(
     const reconcileFromSnapshot = (snapshot: unknown) => {
       const snap = asRecord(snapshot);
 
+      // Resolve the leading bid the snapshot carries (sourced from the active
+      // AuctionPlayer server-side). Without this, the leading team disappears
+      // after every reconnect/sold snapshot and the bid form recomputes its
+      // minimum from the base price, suggesting a bid below the true leading
+      // amount that the backend then rejects as INVALID_INCREMENT.
+      const highBidMinor = asMinor(snap.highBidMinor);
+      const highBidTeamId =
+        typeof snap.highBidTeamId === 'string' ? snap.highBidTeamId : null;
+      let leadingTeam: LeadingTeam | null = null;
+      if (highBidTeamId && highBidMinor !== null) {
+        let name = teamNameFor(highBidTeamId);
+        if (Array.isArray(snap.teams)) {
+          const match = (snap.teams as unknown[])
+            .map(asRecord)
+            .find((t) => t.id === highBidTeamId);
+          if (match && typeof match.name === 'string') name = match.name;
+        }
+        leadingTeam = { id: highBidTeamId, name, amountMinor: highBidMinor };
+      }
+
       const rawPlayer = asRecord(snap.currentPlayer);
       if (Object.keys(rawPlayer).length > 0) {
         const id =
@@ -173,7 +194,7 @@ export function useAuctionRealTime(
             typeof rawPlayer.currency === 'string'
               ? rawPlayer.currency
               : currencyRef.current,
-          leadingTeam: null,
+          leadingTeam,
         });
       } else if (snap.currentPlayerId === null) {
         setCurrentPlayer(null);
@@ -311,10 +332,16 @@ export function useAuctionRealTime(
 
     const requestSnapshot = () => socket.emit('auction:request-snapshot', { auctionId });
 
+    const handlePlayerIntroduced = (payload: unknown) => {
+      pushEvent('PLAYER_INTRODUCED', payload);
+      // Host introduced the next player; pull a fresh snapshot so the active
+      // player (and its base price / leading bid) advances live.
+      requestSnapshot();
+    };
     const handlePlayerSold = (payload: unknown) => {
       pushEvent('PLAYER_SOLD', payload);
-      // No player:introduced is emitted; pull a fresh snapshot to advance to the
-      // next player and refresh squad counts / purses.
+      // Refresh squad counts / purses after a sale. The next player arrives via
+      // the subsequent player:introduced broadcast.
       requestSnapshot();
     };
     const handlePlayerUnsold = (payload: unknown) => {
@@ -337,6 +364,7 @@ export function useAuctionRealTime(
     const handlers: Array<[string, (p: unknown) => void]> = [
       ['bid:accepted', handleBidAccepted],
       ['bid:rejected', handleBidRejected],
+      ['player:introduced', handlePlayerIntroduced],
       ['player:sold', handlePlayerSold],
       ['player:unsold', handlePlayerUnsold],
       ['break:started', handleBreakStarted],

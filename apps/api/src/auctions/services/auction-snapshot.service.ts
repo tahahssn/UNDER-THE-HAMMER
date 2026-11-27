@@ -43,17 +43,29 @@ export class AuctionSnapshotService {
       }))
     );
 
-    // Get current player
+    // Get current player and its leading bid.
+    // High bid lives on AuctionPlayer (currentBidMinor / leadingAuctionTeamId),
+    // not on Auction — auction.highBidMinor is legacy and no longer maintained,
+    // so sourcing it here would be stale/null. BigInt money fields are emitted
+    // as strings so the Socket.IO JSON parser can serialize them.
     let currentPlayer = null;
+    let highBidMinor: string | null = null;
+    let highBidTeamId: string | null = null;
     if (auction.currentAuctionPlayerId) {
       const players = await this.repo.getAuctionPlayers(auctionId);
       const current = players.find((p: any) => p.id === auction.currentAuctionPlayerId);
       if (current) {
+        highBidMinor = current.currentBidMinor != null ? current.currentBidMinor.toString() : null;
+        highBidTeamId = current.leadingAuctionTeamId ?? null;
         currentPlayer = {
           id: current.id,
-          name: current.player?.name,
+          name: current.player?.displayName ?? current.player?.fullName ?? current.player?.name,
+          role: current.player?.role,
           category: current.player?.category,
-          nationality: current.player?.nationality,
+          nationality: current.player?.countryCode ?? current.player?.nationality,
+          basePriceMinor: current.basePriceMinor != null ? current.basePriceMinor.toString() : '0',
+          currentBidMinor: highBidMinor,
+          leadingAuctionTeamId: highBidTeamId,
         };
       }
     }
@@ -65,8 +77,8 @@ export class AuctionSnapshotService {
       stateVersion: auction.stateVersion,
       currentPlayerId: auction.currentAuctionPlayerId,
       currentPlayer,
-      highBidMinor: auction.highBidMinor,
-      highBidTeamId: auction.highBidTeamId,
+      highBidMinor,
+      highBidTeamId,
       phaseDeadline: auction.phaseDeadline,
       teams: teamsWithBalances,
       events: events.map((e: any) => ({
