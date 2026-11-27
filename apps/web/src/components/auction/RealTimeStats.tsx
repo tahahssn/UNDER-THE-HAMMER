@@ -7,8 +7,12 @@ export interface RealTimeStatsProps {
   bidCount: number;
   /** Timestamp of the most recent bid (ms epoch, ISO string, or Date). */
   lastBidTimestamp: number | string | Date | null;
-  /** Seconds until the next scheduled break, or null when none is scheduled. */
-  nextBreakIn: number | null;
+  /**
+   * Accepted bids remaining before the next scheduled break, or null when no
+   * break cadence is configured. Breaks are proposed after every N accepted
+   * bids (Phase H), so the countdown is in bids, not seconds.
+   */
+  bidsUntilBreak: number | null;
 }
 
 /** Format a non-negative number of seconds as MM:SS. */
@@ -27,30 +31,24 @@ function toMs(value: number | string | Date | null): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+// Approaching-break thresholds (bids remaining).
+const BREAK_WARN_AT = 5;
+const BREAK_DANGER_AT = 2;
+
 /**
  * RealTimeStats: live counters for the active player.
  *
- * Displays the bid count, time elapsed since the last bid, and a countdown to
- * the next scheduled break. The elapsed/countdown values tick once per second
- * using a single interval; the remaining break time renders in MM:SS.
+ * Displays the bid count, time elapsed since the last bid (MM:SS, ticking once
+ * per second), and the number of accepted bids remaining before the next
+ * break. The break counter changes colour as it approaches (warn / danger) so
+ * owners can anticipate the pause.
  */
 export function RealTimeStats({
   bidCount,
   lastBidTimestamp,
-  nextBreakIn,
+  bidsUntilBreak,
 }: RealTimeStatsProps) {
   const [now, setNow] = useState<number>(() => Date.now());
-
-  // Anchor the break countdown as state when the input changes so a change
-  // reliably triggers a re-render (a ref + same-value setNow would bail out).
-  const [breakTarget, setBreakTarget] = useState<number | null>(() =>
-    typeof nextBreakIn === 'number' ? Date.now() + nextBreakIn * 1000 : null
-  );
-  useEffect(() => {
-    setBreakTarget(
-      typeof nextBreakIn === 'number' ? Date.now() + nextBreakIn * 1000 : null
-    );
-  }, [nextBreakIn]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -62,9 +60,16 @@ export function RealTimeStats({
     lastBidMs !== null ? Math.max(0, Math.floor((now - lastBidMs) / 1000)) : null;
 
   const breakRemaining =
-    breakTarget !== null
-      ? Math.max(0, Math.floor((breakTarget - now) / 1000))
-      : null;
+    bidsUntilBreak !== null ? Math.max(0, Math.floor(bidsUntilBreak)) : null;
+
+  const breakColorClass =
+    breakRemaining === null
+      ? 'text-text-primary'
+      : breakRemaining <= BREAK_DANGER_AT
+        ? 'text-danger'
+        : breakRemaining <= BREAK_WARN_AT
+          ? 'text-warning'
+          : 'text-text-primary';
 
   return (
     <dl
@@ -101,9 +106,11 @@ export function RealTimeStats({
         </dt>
         <dd
           aria-live="polite"
-          className="mt-1 text-2xl font-bold tabular-nums text-text-primary"
+          className={`mt-1 text-2xl font-bold tabular-nums ${breakColorClass}`}
         >
-          {breakRemaining !== null ? formatMmSs(breakRemaining) : '—'}
+          {breakRemaining !== null
+            ? `${breakRemaining} ${breakRemaining === 1 ? 'bid' : 'bids'}`
+            : '—'}
         </dd>
       </div>
     </dl>

@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
-import { API_CONFIG } from '@/lib/constants';
-import { getAuthToken } from '@/lib/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSocket } from './useSocket';
 import {
   BidError,
   generateIdempotencyKey,
@@ -18,16 +17,16 @@ export interface OptimisticBid {
 export interface UseBidPlacementOptions {
   auctionId: string;
   teamId: string;
+  /** The player currently on the block; required for the bid payload. */
+  auctionPlayerId: string;
+  /** Latest known optimistic-concurrency version for the auction. */
+  stateVersion?: number;
   /**
    * Called synchronously when a bid is submitted, before the server responds,
    * so the UI can render an optimistic pending entry. Keyed by idempotency key
    * so the real-time layer can reconcile the accepted/rejected result.
    */
   onOptimistic?: (bid: OptimisticBid) => void;
-  /** Max retry attempts on transient network failure (default 2). */
-  maxRetries?: number;
-  /** Base delay in ms between retries (default 300). */
-  retryDelayMs?: number;
 }
 
 export interface UseBidPlacementResult {
@@ -41,32 +40,30 @@ export interface UseBidPlacementResult {
   clearError: () => void;
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
  * useBidPlacement: owns bid form state and the submission lifecycle.
  *
- * - Generates a fresh idempotency key per submission (RFC4122 UUID).
- * - Emits an optimistic bid before awaiting the server so the feed updates
- *   immediately; the real-time layer reconciles acceptance/rejection by key.
- * - Posts to `POST /api/auctions/[id]/bids` with `{ amount, teamId, idempotencyKey }`.
- * - Maps server rejection codes onto user-facing {@link BidError} objects.
- * - Retries transient network failures with a short backoff; business
- *   rejections (HTTP 4xx) are never retried.
+ * Bids are placed over the authoritative Socket.IO transport, not HTTP: the
+ * backend accepts them only via the `bid:submit` gateway message and answers
+ * with `bid:accepted` / `bid:rejected` / `bid:error` events that echo the
+ * submitter's idempotency key.
  *
- * The backend remains authoritative: optimistic UI is visual only and is
- * replaced by the server result.
+ * - Generates a fresh idempotency key per submission (RFC4122 UUID).
+ * - Emits an optimistic bid before the server responds so the feed updates
+ *   immediately; the real-time layer reconciles acceptance/rejection by key.
+ * - Resolves `submitBid` as soon as the bid is handed to the transport
+ *   (optimistic). A later `bid:rejected` / `bid:error` carrying this key sets a
+ *   user-facing {@link BidError}; the backend remains authoritative.
+ * - When the socket is not connected the submission fails fast with a network
+ *   error (Socket.IO transparently reconnects and the user can retry).
  */
 export function useBidPlacement(
   options: UseBidPlacementOptions
 ): UseBidPlacementResult {
-  const {
-    auctionId,
-    teamId,
-    onOptimistic,
-    maxRetries = 2,
-    retryDelayMs = 300,
-  } = options;
+  const { auctionId, teamId, auctionPlayerId, stateVersion = 0, onOptimistic } =
+    options;
+
+  const socket = useSocket();
 
   const [bidAmount, setBidAmount] = useState<string>('');
   const [error, setError] = useState<BidError | null>(null);
@@ -78,8 +75,51 @@ export function useBidPlacement(
 
   // Guard against double submits racing within the same tick.
   const inFlightRef = useRef(false);
+  // The key we are currently awaiting a server verdict for.
+  const pendingKeyRef = useRef<string | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
+
+  // Surface server rejections/errors that match our pending submission. The
+  // accepted path is reconciled by useAuctionRealTime; here we only need to
+  // turn a rejection into a visible error on the form.
+  useEffect(() => {
+    if (!socket) return;
+
+    const matchesPending = (payload: unknown): boolean => {
+      if (!payload || typeof payload !== 'object') return false;
+      const key = (payload as { idempotencyKey?: unknown }).idempotencyKey;
+      return (
+        typeof key === 'string' &&
+        pendingKeyRef.current !== null &&
+        key === pendingKeyRef.current
+      );
+    };
+
+    const handleRejected = (payload: unknown) => {
+      if (!matchesPending(payload)) return;
+      const bidError = normalizeBidError(payload);
+      setError(bidError);
+      setLastError(bidError);
+      pendingKeyRef.current = null;
+    };
+
+    const handleAccepted = (payload: unknown) => {
+      if (!matchesPending(payload)) return;
+      setError(null);
+      pendingKeyRef.current = null;
+    };
+
+    socket.on('bid:rejected', handleRejected);
+    socket.on('bid:error', handleRejected);
+    socket.on('bid:accepted', handleAccepted);
+
+    return () => {
+      socket.off('bid:rejected', handleRejected);
+      socket.off('bid:error', handleRejected);
+      socket.off('bid:accepted', handleAccepted);
+    };
+  }, [socket]);
 
   const submitBid = useCallback(
     async (amount?: number): Promise<boolean> => {
@@ -100,79 +140,54 @@ export function useBidPlacement(
       const amountMinor = Math.round(parsed);
 
       if (inFlightRef.current) return false;
-      inFlightRef.current = true;
 
+      if (!socket || !socket.connected) {
+        const netError: BidError = {
+          code: 'NETWORK_ERROR',
+          message: 'Not connected. Reconnecting — please try again.',
+        };
+        setError(netError);
+        setLastError(netError);
+        return false;
+      }
+
+      inFlightRef.current = true;
       const idempotencyKey = generateIdempotencyKey();
+      pendingKeyRef.current = idempotencyKey;
       setLastIdempotencyKey(idempotencyKey);
       setIsSubmitting(true);
       setError(null);
 
-      // Optimistic update: show the bid as pending immediately.
-      onOptimistic?.({ amountMinor, idempotencyKey, teamId });
-
-      const token = getAuthToken();
-      const url = `${API_CONFIG.baseUrl}/api/auctions/${encodeURIComponent(
-        auctionId
-      )}/bids`;
-      const body = JSON.stringify({ amount: amountMinor, teamId, idempotencyKey });
-
-      let attempt = 0;
       try {
-        // Retry loop only covers transient transport failures.
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          try {
-            const response = await fetch(url, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              },
-              body,
-            });
+        // Optimistic update: show the bid as pending immediately.
+        onOptimistic?.({ amountMinor, idempotencyKey, teamId });
 
-            if (response.ok) {
-              setError(null);
-              return true;
-            }
+        // Authoritative transport: the gateway validates and answers with
+        // bid:accepted / bid:rejected / bid:error carrying this key.
+        socket.emit('bid:submit', {
+          auctionId,
+          auctionPlayerId,
+          auctionTeamId: teamId,
+          amountMinor: String(amountMinor),
+          idempotencyKey,
+          stateVersion,
+        });
 
-            // Business rejection: parse structured error, do not retry.
-            let payload: unknown = null;
-            try {
-              payload = await response.json();
-            } catch {
-              payload = null;
-            }
-            const bidError = normalizeBidError(
-              payload ?? { code: `HTTP_${response.status}` }
-            );
-            setError(bidError);
-            setLastError(bidError);
-            return false;
-          } catch (networkErr) {
-            // Transient network failure — retry with backoff.
-            if (attempt >= maxRetries) {
-              const netError: BidError = {
-                code: 'NETWORK_ERROR',
-                message:
-                  networkErr instanceof Error
-                    ? networkErr.message
-                    : 'Network error while placing bid.',
-              };
-              setError(netError);
-              setLastError(netError);
-              return false;
-            }
-            attempt += 1;
-            await sleep(retryDelayMs * attempt);
-          }
-        }
+        return true;
       } finally {
         setIsSubmitting(false);
         inFlightRef.current = false;
       }
     },
-    [auctionId, teamId, bidAmount, onOptimistic, maxRetries, retryDelayMs]
+    [
+      socket,
+      auctionId,
+      auctionPlayerId,
+      stateVersion,
+      teamId,
+      bidAmount,
+      onOptimistic,
+    ]
   );
 
   return {

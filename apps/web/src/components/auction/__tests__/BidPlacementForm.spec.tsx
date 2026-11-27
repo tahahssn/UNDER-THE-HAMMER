@@ -1,44 +1,51 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { BidPlacementForm } from '../BidPlacementForm';
 
-function mockFetchOk() {
-  return vi.fn().mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: async () => ({ accepted: true }),
-  });
+vi.mock('@/hooks/useSocket', () => ({ useSocket: vi.fn() }));
+import { useSocket } from '@/hooks/useSocket';
+
+function makeSocket() {
+  const handlers: Record<string, Array<(p: unknown) => void>> = {};
+  return {
+    connected: true,
+    emit: vi.fn(),
+    on: (e: string, h: (p: unknown) => void) => {
+      (handlers[e] ||= []).push(h);
+    },
+    off: (e: string, h: (p: unknown) => void) => {
+      if (handlers[e]) handlers[e] = handlers[e].filter((x) => x !== h);
+    },
+    _emit: (e: string, d: unknown) => (handlers[e] || []).forEach((h) => h(d)),
+  };
 }
 
-function mockFetchReject(code: string, extra: Record<string, unknown> = {}) {
-  return vi.fn().mockResolvedValue({
-    ok: false,
-    status: 400,
-    json: async () => ({ code, ...extra }),
-  });
-}
+let socket: ReturnType<typeof makeSocket>;
 
 const baseProps = {
   auctionId: 'auction-1',
   roomId: 'room-1',
   teamId: 'team-1',
+  auctionPlayerId: 'ap-1',
+  stateVersion: 1,
   currentTeamPurse: 200_000_000,
-  minimumBid: 10_000_000,
+  basePrice: 10_000_000, // next valid bid = base price (no leading bid)
   maxBid: 200_000_000,
   currency: 'PKR',
 };
 
+beforeEach(() => {
+  socket = makeSocket();
+  (useSocket as unknown as ReturnType<typeof vi.fn>).mockReturnValue(socket);
+});
+
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 describe('BidPlacementForm', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', mockFetchOk());
-  });
-
-  it('submits a valid bid and clears the input', async () => {
+  it('submits a valid bid over the socket and clears the input', async () => {
     const onSubmit = vi.fn();
     render(<BidPlacementForm {...baseProps} onSubmit={onSubmit} />);
 
@@ -54,12 +61,15 @@ describe('BidPlacementForm', () => {
     expect(key.length).toBeGreaterThan(0);
 
     await waitFor(() => {
-      expect((global.fetch as any)).toHaveBeenCalledTimes(1);
+      expect(socket.emit).toHaveBeenCalledWith(
+        'bid:submit',
+        expect.objectContaining({ amountMinor: '15000000', auctionTeamId: 'team-1' })
+      );
       expect(input.value).toBe('');
     });
   });
 
-  it('rejects a bid below the minimum with a preview message and blocks submit', () => {
+  it('rejects a bid below the next valid bid with a preview message and blocks submit', () => {
     const onSubmit = vi.fn();
     render(<BidPlacementForm {...baseProps} onSubmit={onSubmit} />);
 
@@ -72,14 +82,40 @@ describe('BidPlacementForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('shows a server rejection error (INSUFFICIENT_PURSE)', async () => {
-    vi.stubGlobal('fetch', mockFetchReject('INSUFFICIENT_PURSE', { availableMinor: 120_000_000 }));
+  it('computes the next valid bid one increment above the current leader', () => {
+    // Leading at 1 crore (1e9 paisa) → +15 lakh (1.5e8 paisa) = 1.15 crore.
+    render(
+      <BidPlacementForm
+        {...baseProps}
+        currentLeadingBid={1_000_000_000}
+        onSubmit={vi.fn()}
+      />
+    );
+    const input = screen.getByLabelText(/bid amount/i) as HTMLInputElement;
+    // Clicking the "next valid bid" shortcut fills the computed amount.
+    fireEvent.click(screen.getByRole('button', { name: /PKR 1\.15 Cr/i }));
+    expect(input.value).toBe('1150000000');
+  });
+
+  it('shows a server rejection error (INSUFFICIENT_PURSE) for this submission', async () => {
     render(<BidPlacementForm {...baseProps} onSubmit={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText(/bid amount/i), {
       target: { value: '150000000' },
     });
     fireEvent.click(screen.getByRole('button', { name: /place bid/i }));
+
+    const submitPayload = socket.emit.mock.calls.find(
+      (c) => c[0] === 'bid:submit'
+    )?.[1] as { idempotencyKey: string };
+
+    act(() => {
+      socket._emit('bid:rejected', {
+        code: 'INSUFFICIENT_PURSE',
+        availableMinor: 120_000_000,
+        idempotencyKey: submitPayload.idempotencyKey,
+      });
+    });
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('purse');
@@ -108,7 +144,7 @@ describe('BidPlacementForm', () => {
     expect(submit.disabled).toBe(true);
   });
 
-  it('fills the minimum bid when the minimum shortcut is clicked', () => {
+  it('fills the next valid bid when the shortcut is clicked', () => {
     render(<BidPlacementForm {...baseProps} onSubmit={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /PKR 1\.00 L/i }));
     const input = screen.getByLabelText(/bid amount/i) as HTMLInputElement;

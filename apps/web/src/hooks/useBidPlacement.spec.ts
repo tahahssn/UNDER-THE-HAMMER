@@ -2,26 +2,43 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useBidPlacement } from './useBidPlacement';
 
-function okFetch() {
-  return vi.fn().mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: async () => ({ accepted: true }),
-  });
+vi.mock('./useSocket', () => ({ useSocket: vi.fn() }));
+import { useSocket } from './useSocket';
+
+function makeSocket(connected = true) {
+  const handlers: Record<string, Array<(p: unknown) => void>> = {};
+  return {
+    connected,
+    emit: vi.fn(),
+    on: (e: string, h: (p: unknown) => void) => {
+      (handlers[e] ||= []).push(h);
+    },
+    off: (e: string, h: (p: unknown) => void) => {
+      if (handlers[e]) handlers[e] = handlers[e].filter((x) => x !== h);
+    },
+    _emit: (e: string, d: unknown) => (handlers[e] || []).forEach((h) => h(d)),
+  };
 }
 
-const baseOpts = { auctionId: 'a1', teamId: 't1' };
+const baseOpts = {
+  auctionId: 'a1',
+  teamId: 't1',
+  auctionPlayerId: 'p1',
+  stateVersion: 2,
+};
+
+let socket: ReturnType<typeof makeSocket>;
+
+beforeEach(() => {
+  socket = makeSocket(true);
+  (useSocket as unknown as ReturnType<typeof vi.fn>).mockReturnValue(socket);
+});
 
 afterEach(() => {
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
 
 describe('useBidPlacement', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', okFetch());
-  });
-
   it('exposes initial form state', () => {
     const { result } = renderHook(() => useBidPlacement(baseOpts));
     expect(result.current.bidAmount).toBe('');
@@ -36,7 +53,7 @@ describe('useBidPlacement', () => {
     expect(result.current.bidAmount).toBe('12345');
   });
 
-  it('submits a bid with amount, teamId and a generated idempotency key', async () => {
+  it('submits a bid over the socket with the authoritative payload and key', async () => {
     const onOptimistic = vi.fn();
     const { result } = renderHook(() =>
       useBidPlacement({ ...baseOpts, onOptimistic })
@@ -50,13 +67,17 @@ describe('useBidPlacement', () => {
     expect(ok).toBe(true);
     expect(onOptimistic).toHaveBeenCalledTimes(1);
 
-    const call = (global.fetch as any).mock.calls[0];
-    expect(call[0]).toContain('/api/auctions/a1/bids');
-    const body = JSON.parse(call[1].body);
-    expect(body.amount).toBe(15_000_000);
-    expect(body.teamId).toBe('t1');
-    expect(typeof body.idempotencyKey).toBe('string');
-    expect(result.current.lastIdempotencyKey).toBe(body.idempotencyKey);
+    const [event, payload] = socket.emit.mock.calls[0];
+    expect(event).toBe('bid:submit');
+    expect(payload).toMatchObject({
+      auctionId: 'a1',
+      auctionPlayerId: 'p1',
+      auctionTeamId: 't1',
+      amountMinor: '15000000',
+      stateVersion: 2,
+    });
+    expect(typeof payload.idempotencyKey).toBe('string');
+    expect(result.current.lastIdempotencyKey).toBe(payload.idempotencyKey);
   });
 
   it('generates a unique idempotency key per submission', async () => {
@@ -74,7 +95,7 @@ describe('useBidPlacement', () => {
     expect(first).not.toBe(second);
   });
 
-  it('rejects an invalid amount without calling the API', async () => {
+  it('rejects an invalid amount without emitting', async () => {
     const { result } = renderHook(() => useBidPlacement(baseOpts));
     let ok = true;
     await act(async () => {
@@ -82,56 +103,49 @@ describe('useBidPlacement', () => {
     });
     expect(ok).toBe(false);
     expect(result.current.error?.code).toBe('INVALID_INCREMENT');
-    expect((global.fetch as any)).not.toHaveBeenCalled();
+    expect(socket.emit).not.toHaveBeenCalled();
   });
 
-  it('maps a server rejection code to a user-facing error', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 400,
-        json: async () => ({ code: 'INSUFFICIENT_PURSE', availableMinor: 5_000_000 }),
-      })
-    );
+  it('maps a server rejection carrying the idempotency key to a user error', async () => {
     const { result } = renderHook(() => useBidPlacement(baseOpts));
-    let ok = true;
     await act(async () => {
-      ok = await result.current.submitBid(9_000_000);
+      await result.current.submitBid(9_000_000);
     });
-    expect(ok).toBe(false);
+    const key = result.current.lastIdempotencyKey;
+
+    act(() => {
+      socket._emit('bid:rejected', {
+        code: 'INSUFFICIENT_PURSE',
+        availableMinor: 5_000_000,
+        idempotencyKey: key,
+      });
+    });
+
     expect(result.current.error?.code).toBe('INSUFFICIENT_PURSE');
     expect(result.current.error?.availableMinor).toBe(5_000_000);
   });
 
-  it('retries on transient network failure then succeeds', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('network down'))
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { result } = renderHook(() =>
-      useBidPlacement({ ...baseOpts, retryDelayMs: 1, maxRetries: 2 })
-    );
-
-    let ok = false;
+  it('ignores a rejection for a different idempotency key', async () => {
+    const { result } = renderHook(() => useBidPlacement(baseOpts));
     await act(async () => {
-      ok = await result.current.submitBid(10_000_000);
+      await result.current.submitBid(9_000_000);
     });
 
-    expect(ok).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    act(() => {
+      socket._emit('bid:rejected', {
+        code: 'INSUFFICIENT_PURSE',
+        idempotencyKey: 'someone-else',
+      });
+    });
+
+    expect(result.current.error).toBeNull();
   });
 
-  it('gives up after exhausting retries on network failure', async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new Error('offline'));
-    vi.stubGlobal('fetch', fetchMock);
+  it('fails fast with a network error when the socket is disconnected', async () => {
+    socket = makeSocket(false);
+    (useSocket as unknown as ReturnType<typeof vi.fn>).mockReturnValue(socket);
 
-    const { result } = renderHook(() =>
-      useBidPlacement({ ...baseOpts, retryDelayMs: 1, maxRetries: 1 })
-    );
-
+    const { result } = renderHook(() => useBidPlacement(baseOpts));
     let ok = true;
     await act(async () => {
       ok = await result.current.submitBid(10_000_000);
@@ -139,7 +153,7 @@ describe('useBidPlacement', () => {
 
     expect(ok).toBe(false);
     expect(result.current.error?.code).toBe('NETWORK_ERROR');
-    expect(fetchMock).toHaveBeenCalledTimes(2); // initial + 1 retry
+    expect(socket.emit).not.toHaveBeenCalled();
   });
 
   it('clears the error via clearError', async () => {

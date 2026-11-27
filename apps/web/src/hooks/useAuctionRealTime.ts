@@ -7,6 +7,7 @@ import {
   BidRecord,
   BreakState,
   LeadingTeam,
+  resolveCurrency,
   TeamStanding,
 } from '@/lib/auction-live';
 import { OptimisticBid } from './useBidPlacement';
@@ -15,13 +16,10 @@ import { OptimisticBid } from './useBidPlacement';
 export type AuctionEventType =
   | 'BID_ACCEPTED'
   | 'BID_REJECTED'
-  | 'PLAYER_INTRODUCED'
   | 'PLAYER_SOLD'
   | 'PLAYER_UNSOLD'
   | 'BREAK_STARTED'
-  | 'BREAK_ENDED'
-  | 'SQUAD_UPDATED'
-  | 'PRESENCE_UPDATE';
+  | 'BREAK_ENDED';
 
 export interface AuctionEvent {
   type: AuctionEventType;
@@ -32,7 +30,9 @@ export interface AuctionEvent {
 export interface UseAuctionRealTimeOptions {
   initialPlayer?: (AuctionPlayer & { leadingTeam?: LeadingTeam | null }) | null;
   initialTeams?: TeamStanding[];
-  /** Called when a reconnect snapshot should reconcile server-side state. */
+  /** Fallback currency used when a payload omits one. */
+  currency?: string;
+  /** Called when a reconnect/sold snapshot should reconcile server-side state. */
   onReconcile?: () => void;
 }
 
@@ -48,19 +48,6 @@ export interface UseAuctionRealTimeResult {
   addOptimisticBid: (bid: OptimisticBid, teamName: string) => void;
 }
 
-/** Socket.IO event name → normalized logical type. */
-const EVENT_MAP: Record<string, AuctionEventType> = {
-  'bid:accepted': 'BID_ACCEPTED',
-  'bid:rejected': 'BID_REJECTED',
-  'player:introduced': 'PLAYER_INTRODUCED',
-  'player:sold': 'PLAYER_SOLD',
-  'player:unsold': 'PLAYER_UNSOLD',
-  'break:started': 'BREAK_STARTED',
-  'break:ended': 'BREAK_ENDED',
-  'squad:updated': 'SQUAD_UPDATED',
-  'room:presence:update': 'PRESENCE_UPDATE',
-};
-
 const MAX_BIDS = 50;
 const MAX_EVENTS = 100;
 
@@ -70,20 +57,43 @@ function asRecord(payload: unknown): Record<string, unknown> {
     : {};
 }
 
+function asMinor(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 /**
- * useAuctionRealTime: subscribe to live auction events over the room socket.
+ * useAuctionRealTime: subscribe to the live auction event stream over the room
+ * socket and derive the UI state (current player, bid feed, team standings,
+ * break state).
  *
- * Normalizes Phase I/G socket events into a single stream and derived state
- * (current player, bid feed, team standings, break state). On reconnect it
- * requests a fresh snapshot so local state is reconciled with the server.
- * Optimistic bids registered via {@link addOptimisticBid} are deduplicated
- * against accepted/rejected events by idempotency key.
+ * Event alignment (Phase I gateway, confirmed against apps/api/src): the
+ * backend emits `bid:accepted`, `bid:rejected`, `bid:error`, `player:sold`,
+ * `break:started/ended`, `countdown:update`, `room:snapshot` and
+ * `room:presence`. It does NOT emit `player:introduced`, `player:unsold` or
+ * `squad:updated`. Because of that, the active player and squad counts are
+ * advanced by requesting a fresh `room:snapshot` whenever a player is sold (and
+ * on reconnect), rather than relying on a dedicated introduce/squad event. The
+ * handlers for those not-yet-emitted events are kept, harmless and
+ * forward-compatible, so the room upgrades automatically if Phase I adds them.
+ *
+ * Optimistic bids registered via {@link addOptimisticBid} are reconciled
+ * against accepted/rejected events by idempotency key (echoed by the gateway).
  */
 export function useAuctionRealTime(
   auctionId: string,
   options: UseAuctionRealTimeOptions = {}
 ): UseAuctionRealTimeResult {
-  const { initialPlayer = null, initialTeams = [], onReconcile } = options;
+  const {
+    initialPlayer = null,
+    initialTeams = [],
+    currency = 'PKR',
+    onReconcile,
+  } = options;
 
   const socket = useSocket();
   const [events, setEvents] = useState<AuctionEvent[]>([]);
@@ -98,8 +108,18 @@ export function useAuctionRealTime(
 
   // Track accepted bid IDs to ignore duplicate delivery.
   const seenBidIdsRef = useRef<Set<string>>(new Set());
+  // Latest teams, read by handlers without re-subscribing.
+  const teamsRef = useRef<TeamStanding[]>(initialTeams);
+  teamsRef.current = teams;
   const onReconcileRef = useRef(onReconcile);
   onReconcileRef.current = onReconcile;
+  const currencyRef = useRef(currency);
+  currencyRef.current = currency;
+
+  const teamNameFor = useCallback((teamId: string, fallback?: string) => {
+    const match = teamsRef.current.find((t) => t.id === teamId);
+    return match?.name ?? fallback ?? teamId;
+  }, []);
 
   const addOptimisticBid = useCallback(
     (bid: OptimisticBid, teamName: string) => {
@@ -130,21 +150,76 @@ export function useAuctionRealTime(
 
     setIsConnected(socket.connected);
 
+    // Map the backend room:snapshot (and reconcile) — tolerant of both the real
+    // shape (purseBalanceMinor / acquisitions) and already-normalized fields.
     const reconcileFromSnapshot = (snapshot: unknown) => {
       const snap = asRecord(snapshot);
-      if (snap.currentPlayer && typeof snap.currentPlayer === 'object') {
-        setCurrentPlayer(
-          snap.currentPlayer as AuctionPlayer & {
-            leadingTeam?: LeadingTeam | null;
-          }
+
+      const rawPlayer = asRecord(snap.currentPlayer);
+      if (Object.keys(rawPlayer).length > 0) {
+        const id =
+          (typeof rawPlayer.id === 'string' && rawPlayer.id) ||
+          (typeof snap.currentPlayerId === 'string' && snap.currentPlayerId) ||
+          '';
+        setCurrentPlayer({
+          id,
+          name:
+            typeof rawPlayer.name === 'string' ? rawPlayer.name : 'Unknown',
+          role: typeof rawPlayer.role === 'string' ? rawPlayer.role : '',
+          category:
+            typeof rawPlayer.category === 'string' ? rawPlayer.category : '',
+          basePriceMinor: asMinor(rawPlayer.basePriceMinor) ?? 0,
+          currency:
+            typeof rawPlayer.currency === 'string'
+              ? rawPlayer.currency
+              : currencyRef.current,
+          leadingTeam: null,
+        });
+      } else if (snap.currentPlayerId === null) {
+        setCurrentPlayer(null);
+      }
+
+      if (Array.isArray(snap.teams)) {
+        setTeams((prev) =>
+          (snap.teams as unknown[]).map((entry) => {
+            const t = asRecord(entry);
+            const id = typeof t.id === 'string' ? t.id : '';
+            const existing = prev.find((p) => p.id === id);
+            const acquisitions = Array.isArray(t.acquisitions)
+              ? t.acquisitions.length
+              : asMinor(t.squadCount);
+            return {
+              id,
+              name:
+                typeof t.name === 'string'
+                  ? t.name
+                  : existing?.name ?? id,
+              logo:
+                typeof t.logo === 'string' ? t.logo : existing?.logo ?? null,
+              purse:
+                asMinor(t.purseBalanceMinor) ??
+                asMinor(t.purse) ??
+                existing?.purse ??
+                0,
+              squadCount: acquisitions ?? existing?.squadCount ?? 0,
+              maxSquadSize:
+                asMinor(t.maxSquadSize) ?? existing?.maxSquadSize ?? 0,
+              currency: existing?.currency ?? currencyRef.current,
+            } satisfies TeamStanding;
+          })
         );
       }
-      if (Array.isArray(snap.teams)) {
-        setTeams(snap.teams as TeamStanding[]);
+
+      const breakActive =
+        typeof snap.breakActive === 'boolean' ? snap.breakActive : undefined;
+      if (breakActive !== undefined) {
+        setBreakState(breakActive ? 'active' : 'inactive');
       }
-      if (typeof snap.breakActive === 'boolean') {
-        setBreakState(snap.breakActive ? 'active' : 'inactive');
-      }
+
+      // A new player means the previous bid feed no longer applies.
+      setBids([]);
+      seenBidIdsRef.current.clear();
+
       onReconcileRef.current?.();
     };
 
@@ -160,36 +235,31 @@ export function useAuctionRealTime(
       if (bidId && seenBidIdsRef.current.has(bidId)) return;
       if (bidId) seenBidIdsRef.current.add(bidId);
 
-      const amount =
-        typeof data.amountMinor === 'string'
-          ? Number(data.amountMinor)
-          : typeof data.amountMinor === 'number'
-            ? data.amountMinor
-            : 0;
+      const amount = asMinor(data.amountMinor) ?? 0;
       const teamId =
         typeof data.teamId === 'string'
           ? data.teamId
           : typeof data.auctionTeamId === 'string'
             ? data.auctionTeamId
             : '';
+      const resolvedName =
+        typeof data.teamName === 'string'
+          ? data.teamName
+          : teamNameFor(teamId);
 
       setBids((prev) => {
         // Reconcile optimistic pending bid by idempotency key.
         const matchIndex = idempotencyKey
           ? prev.findIndex(
-              (b) => b.status === 'pending' && b.idempotencyKey === idempotencyKey
+              (b) =>
+                b.status === 'pending' && b.idempotencyKey === idempotencyKey
             )
           : -1;
 
         const accepted: BidRecord = {
           id: bidId ?? `accepted-${idempotencyKey ?? Date.now()}`,
           teamId,
-          teamName:
-            matchIndex >= 0
-              ? prev[matchIndex].teamName
-              : typeof data.teamName === 'string'
-                ? data.teamName
-                : teamId,
+          teamName: matchIndex >= 0 ? prev[matchIndex].teamName : resolvedName,
           amount,
           timestamp:
             typeof data.timestamp === 'string'
@@ -214,8 +284,7 @@ export function useAuctionRealTime(
               ...prev,
               leadingTeam: {
                 id: teamId,
-                name:
-                  typeof data.teamName === 'string' ? data.teamName : teamId,
+                name: resolvedName,
                 amountMinor: amount,
               },
             }
@@ -240,39 +309,17 @@ export function useAuctionRealTime(
       );
     };
 
-    const handlePlayerIntroduced = (payload: unknown) => {
-      pushEvent('PLAYER_INTRODUCED', payload);
-      const data = asRecord(payload);
-      const id =
-        typeof data.auctionPlayerId === 'string'
-          ? data.auctionPlayerId
-          : typeof data.playerId === 'string'
-            ? data.playerId
-            : '';
-      setCurrentPlayer({
-        id,
-        name: typeof data.playerName === 'string' ? data.playerName : 'Unknown',
-        role: typeof data.role === 'string' ? data.role : '',
-        category: typeof data.category === 'string' ? data.category : '',
-        basePriceMinor:
-          typeof data.basePrice === 'number'
-            ? data.basePrice
-            : typeof data.basePriceMinor === 'number'
-              ? data.basePriceMinor
-              : 0,
-        currency: typeof data.currency === 'string' ? data.currency : 'PKR',
-        leadingTeam: null,
-      });
-      // A new player clears the previous bid feed.
-      setBids([]);
-      seenBidIdsRef.current.clear();
-    };
+    const requestSnapshot = () => socket.emit('auction:request-snapshot', { auctionId });
 
     const handlePlayerSold = (payload: unknown) => {
       pushEvent('PLAYER_SOLD', payload);
+      // No player:introduced is emitted; pull a fresh snapshot to advance to the
+      // next player and refresh squad counts / purses.
+      requestSnapshot();
     };
     const handlePlayerUnsold = (payload: unknown) => {
       pushEvent('PLAYER_UNSOLD', payload);
+      requestSnapshot();
     };
     const handleBreakStarted = (payload: unknown) => {
       pushEvent('BREAK_STARTED', payload);
@@ -282,29 +329,6 @@ export function useAuctionRealTime(
       pushEvent('BREAK_ENDED', payload);
       setBreakState('inactive');
     };
-    const handleSquadUpdated = (payload: unknown) => {
-      pushEvent('SQUAD_UPDATED', payload);
-      const data = asRecord(payload);
-      const teamId =
-        typeof data.auctionTeamId === 'string' ? data.auctionTeamId : undefined;
-      if (!teamId) return;
-      setTeams((prev) =>
-        prev.map((t) =>
-          t.id === teamId
-            ? {
-                ...t,
-                squadCount:
-                  typeof data.totalAcquisitions === 'number'
-                    ? data.totalAcquisitions
-                    : t.squadCount,
-              }
-            : t
-        )
-      );
-    };
-    const handlePresenceUpdate = (payload: unknown) => {
-      pushEvent('PRESENCE_UPDATE', payload);
-    };
     const handleError = (payload: unknown) => {
       const data = asRecord(payload);
       setError(typeof data.error === 'string' ? data.error : 'Auction error');
@@ -313,13 +337,10 @@ export function useAuctionRealTime(
     const handlers: Array<[string, (p: unknown) => void]> = [
       ['bid:accepted', handleBidAccepted],
       ['bid:rejected', handleBidRejected],
-      ['player:introduced', handlePlayerIntroduced],
       ['player:sold', handlePlayerSold],
       ['player:unsold', handlePlayerUnsold],
       ['break:started', handleBreakStarted],
       ['break:ended', handleBreakEnded],
-      ['squad:updated', handleSquadUpdated],
-      ['room:presence:update', handlePresenceUpdate],
       ['room:snapshot', reconcileFromSnapshot],
       ['bid:error', handleError],
     ];
@@ -329,7 +350,7 @@ export function useAuctionRealTime(
     // Reconnect: request a fresh snapshot to reconcile.
     const handleConnect = () => {
       setIsConnected(true);
-      socket.emit('auction:request-snapshot', { auctionId });
+      requestSnapshot();
     };
     const handleDisconnect = () => setIsConnected(false);
 
@@ -341,7 +362,7 @@ export function useAuctionRealTime(
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
     };
-  }, [socket, auctionId, pushEvent]);
+  }, [socket, auctionId, pushEvent, teamNameFor]);
 
   return {
     events,

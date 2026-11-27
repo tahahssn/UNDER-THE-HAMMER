@@ -32,7 +32,7 @@ let socket: ReturnType<typeof makeSocket>;
 
 beforeEach(() => {
   socket = makeSocket();
-  (useSocket as any).mockReturnValue(socket);
+  (useSocket as unknown as ReturnType<typeof vi.fn>).mockReturnValue(socket);
 });
 
 afterEach(() => {
@@ -40,13 +40,16 @@ afterEach(() => {
 });
 
 describe('useAuctionRealTime', () => {
-  it('subscribes to the core auction socket events', () => {
+  it('subscribes to the events the backend actually emits', () => {
     renderHook(() => useAuctionRealTime('a1'));
     expect(socket._handlers['bid:accepted']).toBeDefined();
     expect(socket._handlers['bid:rejected']).toBeDefined();
-    expect(socket._handlers['player:introduced']).toBeDefined();
+    expect(socket._handlers['player:sold']).toBeDefined();
     expect(socket._handlers['break:started']).toBeDefined();
-    expect(socket._handlers['room:presence:update']).toBeDefined();
+    expect(socket._handlers['room:snapshot']).toBeDefined();
+    // Events that Phase I never broadcasts are not relied upon for advancement.
+    expect(socket._handlers['player:introduced']).toBeUndefined();
+    expect(socket._handlers['squad:updated']).toBeUndefined();
   });
 
   it('records an accepted bid and updates the leading team', () => {
@@ -61,6 +64,9 @@ describe('useAuctionRealTime', () => {
           currency: 'PKR',
           leadingTeam: null,
         },
+        initialTeams: [
+          { id: 't1', name: 'Lahore', purse: 1, squadCount: 0, maxSquadSize: 10 },
+        ],
       })
     );
 
@@ -68,14 +74,15 @@ describe('useAuctionRealTime', () => {
       socket._emit('bid:accepted', {
         bidId: 'b1',
         teamId: 't1',
-        teamName: 'Lahore',
-        amountMinor: 12_000_000,
+        amountMinor: '12000000',
         timestamp: '2026-01-01T00:00:00Z',
       });
     });
 
     expect(result.current.bids.length).toBe(1);
     expect(result.current.bids[0].status).toBe('accepted');
+    // Team name resolved from the standings list.
+    expect(result.current.bids[0].teamName).toBe('Lahore');
     expect(result.current.currentPlayer?.leadingTeam?.id).toBe('t1');
     expect(result.current.currentPlayer?.leadingTeam?.amountMinor).toBe(12_000_000);
   });
@@ -125,30 +132,46 @@ describe('useAuctionRealTime', () => {
       );
     });
     act(() => {
-      socket._emit('bid:rejected', { bidId: 'b2', idempotencyKey: 'key-2', reason: 'BELOW_MINIMUM' });
+      socket._emit('bid:rejected', {
+        bidId: 'b2',
+        idempotencyKey: 'key-2',
+        reason: 'BELOW_MINIMUM',
+      });
     });
     expect(result.current.bids[0].status).toBe('rejected');
   });
 
-  it('sets the current player and clears bids on player:introduced', () => {
+  it('requests a fresh snapshot on player:sold to advance the player', () => {
     const { result } = renderHook(() => useAuctionRealTime('a1'));
     act(() => {
       socket._emit('bid:accepted', { bidId: 'b1', teamId: 't1', amountMinor: 1000 });
     });
     expect(result.current.bids.length).toBe(1);
 
+    act(() => socket._emit('player:sold', { auctionPlayerId: 'p1' }));
+    expect(socket.emit).toHaveBeenCalledWith('auction:request-snapshot', {
+      auctionId: 'a1',
+    });
+
     act(() => {
-      socket._emit('player:introduced', {
-        auctionPlayerId: 'p2',
-        playerName: 'New Player',
-        role: 'Bowler',
-        category: 'Silver',
-        basePrice: 500,
-        currency: 'PKR',
+      socket._emit('room:snapshot', {
+        currentPlayerId: 'p2',
+        currentPlayer: { id: 'p2', name: 'New Player', category: 'Silver' },
+        teams: [
+          {
+            id: 't1',
+            name: 'Lahore',
+            purseBalanceMinor: '9000000',
+            acquisitions: [{ id: 'a' }],
+          },
+        ],
+        breakActive: false,
       });
     });
     expect(result.current.currentPlayer?.name).toBe('New Player');
     expect(result.current.bids.length).toBe(0);
+    expect(result.current.teams[0].purse).toBe(9_000_000);
+    expect(result.current.teams[0].squadCount).toBe(1);
   });
 
   it('toggles break state on break events', () => {
@@ -172,15 +195,16 @@ describe('useAuctionRealTime', () => {
 
     act(() => {
       socket._emit('room:snapshot', {
-        currentPlayer: {
-          id: 'p9',
-          name: 'Snapshot Player',
-          role: 'AR',
-          category: 'Gold',
-          basePriceMinor: 1,
-          currency: 'PKR',
-        },
-        teams: [{ id: 't1', name: 'A', purse: 1, squadCount: 0, maxSquadSize: 10 }],
+        currentPlayerId: 'p9',
+        currentPlayer: { id: 'p9', name: 'Snapshot Player', category: 'Gold' },
+        teams: [
+          {
+            id: 't1',
+            name: 'A',
+            purseBalanceMinor: '1',
+            acquisitions: [],
+          },
+        ],
         breakActive: false,
       });
     });

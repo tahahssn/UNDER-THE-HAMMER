@@ -88,8 +88,68 @@ export interface BidError {
   currency?: string;
 }
 
+/**
+ * A single bid-increment bracket. Mirrors the Phase G configuration: while the
+ * current leading amount falls inside `[fromMinor, toMinor)`, the next valid
+ * bid must be at least `currentLeading + incrementMinor`. All values are in
+ * integer minor units (paisa).
+ */
+export interface BidIncrementBracket {
+  /** Inclusive lower bound of the bracket, in minor units. */
+  fromMinor: number;
+  /** Exclusive upper bound, or null for the open-ended top bracket. */
+  toMinor: number | null;
+  /** Increment applied inside this bracket, in minor units. */
+  incrementMinor: number;
+}
+
 const CRORE_IN_RUPEES = 10_000_000;
 const LAKH_IN_RUPEES = 100_000;
+
+// Minor units are paisa (1 rupee = 100 paisa), consistent with formatMoney.
+const RUPEE = 100;
+const LAKH = 100_000 * RUPEE;
+const CRORE = 10_000_000 * RUPEE;
+
+/**
+ * Client-side preview brackets mirroring the product's sample tiers
+ * (see AGENTS.md §7). These drive only the optimistic UI preview; the backend
+ * remains authoritative for the real increment validation. A room that exposes
+ * its own configured brackets should pass them in instead.
+ */
+export const DEFAULT_INCREMENT_BRACKETS: readonly BidIncrementBracket[] = [
+  { fromMinor: 0, toMinor: 1 * CRORE, incrementMinor: 10 * LAKH },
+  { fromMinor: 1 * CRORE, toMinor: 220 * LAKH, incrementMinor: 15 * LAKH },
+  { fromMinor: 220 * LAKH, toMinor: 4 * CRORE, incrementMinor: 20 * LAKH },
+  { fromMinor: 4 * CRORE, toMinor: null, incrementMinor: 25 * LAKH },
+];
+
+/**
+ * Compute the minimum next valid bid from the increment brackets.
+ *
+ * - With no current leading bid, the minimum is the player's base price.
+ * - Otherwise it is `currentLeading + increment` where the increment is taken
+ *   from the bracket containing the current leading amount.
+ *
+ * Pure and deterministic. The backend revalidates every bid.
+ */
+export function computeMinimumBid(
+  currentLeadingMinor: number | null,
+  basePriceMinor: number,
+  brackets: readonly BidIncrementBracket[] = DEFAULT_INCREMENT_BRACKETS
+): number {
+  if (currentLeadingMinor === null || currentLeadingMinor <= 0) {
+    return Math.max(0, Math.round(basePriceMinor));
+  }
+  const leading = Math.round(currentLeadingMinor);
+  const bracket =
+    brackets.find(
+      (b) =>
+        leading >= b.fromMinor && (b.toMinor === null || leading < b.toMinor)
+    ) ?? brackets[brackets.length - 1];
+  const increment = bracket ? bracket.incrementMinor : 0;
+  return leading + increment;
+}
 
 /**
  * Format an integer minor-unit amount as a compact, human-readable string using

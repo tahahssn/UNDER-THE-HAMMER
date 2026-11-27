@@ -3,19 +3,33 @@
 import React, { useCallback, useMemo } from 'react';
 import Button from '@/components/Button';
 import { useBidPlacement } from '@/hooks/useBidPlacement';
-import { formatMoney, resolveCurrency } from '@/lib/auction-live';
+import {
+  BidIncrementBracket,
+  computeMinimumBid,
+  DEFAULT_INCREMENT_BRACKETS,
+  formatMoney,
+  resolveCurrency,
+} from '@/lib/auction-live';
 import { BidPlacementError } from './BidPlacementError';
 
 export interface BidPlacementFormProps {
   auctionId: string;
   roomId: string;
   teamId: string;
+  /** The player currently on the block; required for the bid payload. */
+  auctionPlayerId: string;
+  /** Latest optimistic-concurrency version for the auction. */
+  stateVersion?: number;
   /** Remaining team purse in integer minor units. */
   currentTeamPurse: number;
-  /** Minimum valid next bid in integer minor units. */
-  minimumBid: number;
+  /** Player base price in integer minor units. */
+  basePrice: number;
+  /** Current leading accepted bid in integer minor units, or null if none yet. */
+  currentLeadingBid?: number | null;
   /** Maximum allowed bid in integer minor units (usually the team purse). */
   maxBid: number;
+  /** Phase G increment brackets used to compute the next valid bid preview. */
+  incrementBrackets?: readonly BidIncrementBracket[];
   /** ISO currency code for display (default PKR). */
   currency?: string;
   /**
@@ -29,24 +43,36 @@ export interface BidPlacementFormProps {
 /**
  * BidPlacementForm: validated bid entry with keyboard support.
  *
- * - Client-side validation (minimum increment, max/purse ceiling) renders a
- *   preview before submission; the backend remains authoritative.
+ * - The next valid bid is computed from the Phase G increment brackets
+ *   ({@link computeMinimumBid}) so the client preview matches server validation
+ *   and can suggest the next valid amount. The backend remains authoritative.
  * - Enter submits, Escape clears the input and any error, Tab follows DOM
  *   order. The submit button is disabled while a bid is in flight.
  * - Submission flows through {@link useBidPlacement}, which generates the
- *   idempotency key and performs the POST; `onSubmit` is invoked optimistically.
+ *   idempotency key and emits `bid:submit`; `onSubmit` is invoked optimistically.
  */
 export function BidPlacementForm({
   auctionId,
   teamId,
+  auctionPlayerId,
+  stateVersion,
   currentTeamPurse,
-  minimumBid,
+  basePrice,
+  currentLeadingBid = null,
   maxBid,
+  incrementBrackets = DEFAULT_INCREMENT_BRACKETS,
   currency,
   onSubmit,
   disabled = false,
 }: BidPlacementFormProps) {
   const resolvedCurrency = resolveCurrency(currency);
+
+  // Next valid bid from the increment brackets (one step above the leader, or
+  // the base price when no bid has been placed yet).
+  const minimumBid = useMemo(
+    () => computeMinimumBid(currentLeadingBid, basePrice, incrementBrackets),
+    [currentLeadingBid, basePrice, incrementBrackets]
+  );
 
   const handleOptimistic = useCallback(
     (bid: { amountMinor: number; idempotencyKey: string }) => {
@@ -65,6 +91,8 @@ export function BidPlacementForm({
   } = useBidPlacement({
     auctionId,
     teamId,
+    auctionPlayerId,
+    stateVersion,
     onOptimistic: handleOptimistic,
   });
 
@@ -144,7 +172,7 @@ export function BidPlacementForm({
       className="space-y-4"
     >
       <div className="flex items-center justify-between text-sm">
-        <span className="text-text-muted">Minimum bid</span>
+        <span className="text-text-muted">Next valid bid</span>
         <button
           type="button"
           onClick={setToMinimum}

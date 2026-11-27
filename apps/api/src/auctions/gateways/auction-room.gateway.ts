@@ -140,28 +140,37 @@ export class AuctionRoomGateway implements OnGatewayConnection, OnGatewayDisconn
         data.stateVersion
       );
 
-      // Only broadcast after the service (including transaction) completes successfully
+      // Only broadcast after the service (including transaction) completes successfully.
+      // The submitter's idempotency key is echoed back on the broadcast so the
+      // originating client can reconcile its optimistic entry by key.
       if (result.accepted) {
         this.broadcaster.broadcastBidAccepted(data.auctionId, {
           bidId: result.id,
           teamId: data.auctionTeamId,
+          auctionPlayerId: data.auctionPlayerId,
           amountMinor: data.amountMinor,
           sequence: result.sequence,
           stateVersion: result.stateVersion,
+          idempotencyKey: data.idempotencyKey,
         });
       } else {
         this.broadcaster.broadcastBidRejected(data.auctionId, {
           bidId: result.id,
           reason: result.reason,
+          idempotencyKey: data.idempotencyKey,
         });
-        
+
         client.emit('bid:rejected', {
           bidId: result.id,
           reason: result.reason,
+          idempotencyKey: data.idempotencyKey,
         });
       }
     } catch (error) {
-      client.emit('bid:error', { error: (error as any).message });
+      client.emit('bid:error', {
+        error: (error as any).message,
+        idempotencyKey: data.idempotencyKey,
+      });
     }
   }
 

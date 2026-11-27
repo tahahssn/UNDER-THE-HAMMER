@@ -1,19 +1,26 @@
 'use client';
 
-import React, { Suspense, useCallback, useEffect, useMemo } from 'react';
+import React, {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useParams, useRouter, useSearchParams, notFound } from 'next/navigation';
 import { WifiOff } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import RoomChat from '@/components/RoomChat';
 import { useAuth } from '@/hooks/useAuth';
+import { useSocket } from '@/hooks/useSocket';
 import { useRoomSocket } from '@/hooks/useRoomSocket';
 import { usePresence } from '@/hooks/usePresence';
 import { useBreakSocket } from '@/hooks/useBreakSocket';
 import { useAuctionState } from '@/hooks/useAuctionState';
 import { useAuctionRealTime } from '@/hooks/useAuctionRealTime';
 import { ROUTES } from '@/lib/constants';
-import { BidRecord, LeadingTeam } from '@/lib/auction-live';
+import { AuctionPlayer, BidRecord, LeadingTeam } from '@/lib/auction-live';
 import { PlayerIntroduction } from '@/components/auction/PlayerIntroduction';
 import { BidPlacementForm } from '@/components/auction/BidPlacementForm';
 import { RealTimeStats } from '@/components/auction/RealTimeStats';
@@ -21,46 +28,54 @@ import { BidHistory } from '@/components/auction/BidHistory';
 import { TeamStandings } from '@/components/auction/TeamStandings';
 import { BreakScreen } from '@/components/auction/BreakScreen';
 
+// Break cadence (Phase H sample): a break is proposed after every N accepted
+// bids. The exact value is host-configurable server-side; this client preview
+// uses the product's documented default and the backend remains authoritative.
+const BREAK_AFTER_N_BIDS = 5;
+
 /**
  * Live auction room.
  *
- * Note on access control: the application authenticates with an in-memory JWT
- * (see AuthContext/lib/api), so there is no server-readable session cookie to
- * gate this route in a Server Component. Membership is therefore enforced
- * against the server-authoritative `GET /api/auctions/[id]/state` response:
- * a 403/404 or `room.isMember === false` renders the Next.js not-found page,
- * which is the functional equivalent of the server returning 404 for
- * non-members. The backend remains authoritative for every auction decision.
+ * Access control: the app authenticates with an in-memory JWT, so there is no
+ * server-readable session cookie to gate this route in a Server Component.
+ * The gate is therefore driven by the server-authoritative signals that exist:
+ *   - A 404 from `GET /api/v1/auctions/:id` means the auction does not exist.
+ *   - The Socket.IO join answers `room:join:error` (AUCTION_NOT_FOUND /
+ *     NOT_ROOM_MEMBER / UNAUTHORIZED) for a user who may not enter.
+ * Either renders the Next.js not-found page. A transport failure is kept
+ * distinct (retry UI) so a flaky network does not masquerade as "not a member".
+ * The backend remains authoritative for every auction decision.
+ *
+ * Identity note: the auction event stream is scoped server-side to
+ * `auction:${auctionId}`, while presence and chat are scoped to
+ * `room:${roomId}`. Those are deliberately different namespaces, so the auction
+ * socket joins by auctionId and presence/chat use the room id.
  */
 function LiveAuctionRoom() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const socket = useSocket();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
 
   const auctionId = (params?.id as string) ?? '';
-  const roomId = searchParams?.get('roomId') ?? auctionId;
 
   const {
     auction,
     room,
     teams: initialTeams,
-    currentPlayer: initialPlayer,
+    basePriceByPlayerId,
+    squadRequirements,
     isLoading: stateLoading,
     status,
     error: stateError,
     refetch,
-  } = useAuctionState(auctionId, roomId);
+  } = useAuctionState(auctionId);
 
-  const role = room?.role ?? 'SPECTATOR';
-  const myTeamId = room?.teamId ?? '';
-  const isHost = role === 'HOST';
+  const roomId = searchParams?.get('roomId') ?? auction?.roomId ?? auctionId;
+  const requestedTeamId = searchParams?.get('teamId') ?? '';
 
-  // Join the auction socket room (and re-join on reconnect).
-  useRoomSocket(auctionId, role, myTeamId || undefined);
-
-  const { participants } = usePresence(roomId);
-  const onlineCount = participants.filter((p) => p.isOnline).length;
+  const isHost = Boolean(room && user && room.hostId === user.id);
 
   const {
     currentPlayer,
@@ -70,10 +85,30 @@ function LiveAuctionRoom() {
     isConnected,
     addOptimisticBid,
   } = useAuctionRealTime(auctionId, {
-    initialPlayer,
     initialTeams,
+    currency: auction?.currency,
     onReconcile: refetch,
   });
+
+  // The user's team is the one they own (passed via the workspace link and
+  // validated against the live team list). The backend authoritatively rejects
+  // bids from a team the user does not own.
+  const myTeamId = useMemo(
+    () => (teams.some((t) => t.id === requestedTeamId) ? requestedTeamId : ''),
+    [teams, requestedTeamId]
+  );
+
+  const role: 'HOST' | 'TEAM_OWNER' | 'SPECTATOR' = isHost
+    ? 'HOST'
+    : myTeamId
+      ? 'TEAM_OWNER'
+      : 'SPECTATOR';
+
+  // Join the auction socket room (and re-join on reconnect).
+  useRoomSocket(auctionId, role, myTeamId || undefined);
+
+  const { participants } = usePresence(roomId);
+  const onlineCount = participants.filter((p) => p.isOnline).length;
 
   const {
     breakStatus,
@@ -82,6 +117,30 @@ function LiveAuctionRoom() {
     reduceBreak,
     endBreak,
   } = useBreakSocket(auctionId);
+
+  // Membership gate driven by the socket join result.
+  const [joinDenied, setJoinDenied] = useState(false);
+  useEffect(() => {
+    if (!socket) return;
+    const handleJoinError = (payload: unknown) => {
+      const code =
+        payload && typeof payload === 'object'
+          ? ((payload as { error?: string; code?: string }).error ??
+            (payload as { code?: string }).code)
+          : undefined;
+      if (
+        code === 'AUCTION_NOT_FOUND' ||
+        code === 'NOT_ROOM_MEMBER' ||
+        code === 'UNAUTHORIZED'
+      ) {
+        setJoinDenied(true);
+      }
+    };
+    socket.on('room:join:error', handleJoinError);
+    return () => {
+      socket.off('room:join:error', handleJoinError);
+    };
+  }, [socket]);
 
   // Redirect unauthenticated users to sign-in.
   useEffect(() => {
@@ -96,6 +155,24 @@ function LiveAuctionRoom() {
   );
 
   const leadingTeam: LeadingTeam | null = currentPlayer?.leadingTeam ?? null;
+
+  // Enrich the live player with the base price from the REST state (the socket
+  // snapshot does not carry it) and the auction currency.
+  const displayPlayer: (AuctionPlayer & { leadingTeam?: LeadingTeam | null }) | null =
+    useMemo(() => {
+      if (!currentPlayer) return null;
+      const basePriceMinor =
+        basePriceByPlayerId[currentPlayer.id] ?? currentPlayer.basePriceMinor;
+      return {
+        ...currentPlayer,
+        basePriceMinor,
+        currency: auction?.currency ?? currentPlayer.currency,
+      };
+    }, [currentPlayer, basePriceByPlayerId, auction?.currency]);
+
+  const acceptedThisPlayer = bids.filter((b) => b.status === 'accepted').length;
+  const bidsUntilBreak =
+    BREAK_AFTER_N_BIDS - (acceptedThisPlayer % BREAK_AFTER_N_BIDS);
 
   const lastBid = bids.length > 0 ? bids[bids.length - 1] : null;
 
@@ -118,8 +195,9 @@ function LiveAuctionRoom() {
     return <LoadingSpinner fullScreen message="Redirecting…" />;
   }
 
-  // Membership gate: non-members get the not-found page.
-  if (status === 404 || status === 403 || (room && room.isMember === false)) {
+  // Membership gate: a missing auction (404) or an authoritative join denial
+  // renders the not-found page. Transport errors fall through to the retry UI.
+  if (status === 404 || joinDenied) {
     notFound();
   }
 
@@ -179,28 +257,31 @@ function LiveAuctionRoom() {
           {/* Main column */}
           <div className="space-y-6">
             <PlayerIntroduction
-              player={currentPlayer}
+              player={displayPlayer}
               leadingTeam={leadingTeam}
               isLoading={stateLoading && !currentPlayer}
             />
 
             <div className="rounded-lg border border-border bg-surface p-4 sm:p-6">
-              {canBid ? (
+              {canBid && displayPlayer ? (
                 <BidPlacementForm
                   auctionId={auctionId}
                   roomId={roomId}
                   teamId={myTeamId}
+                  auctionPlayerId={displayPlayer.id}
+                  stateVersion={auction?.stateVersion}
                   currentTeamPurse={myTeam?.purse ?? 0}
-                  minimumBid={
-                    leadingTeam
-                      ? leadingTeam.amountMinor
-                      : currentPlayer?.basePriceMinor ?? 0
-                  }
+                  basePrice={displayPlayer.basePriceMinor}
+                  currentLeadingBid={leadingTeam ? leadingTeam.amountMinor : null}
                   maxBid={myTeam?.purse ?? 0}
-                  currency={currentPlayer?.currency}
+                  currency={displayPlayer.currency}
                   onSubmit={handleOptimisticBid}
                   disabled={breakState === 'active' || isBreakActive}
                 />
+              ) : canBid ? (
+                <p className="text-sm text-text-muted">
+                  Waiting for the next player to be introduced…
+                </p>
               ) : (
                 <p className="text-sm text-text-muted">
                   You are viewing as a spectator. Bidding is restricted to
@@ -210,9 +291,11 @@ function LiveAuctionRoom() {
             </div>
 
             <RealTimeStats
-              bidCount={bids.filter((b: BidRecord) => b.status !== 'rejected').length}
+              bidCount={
+                bids.filter((b: BidRecord) => b.status !== 'rejected').length
+              }
               lastBidTimestamp={lastBid ? lastBid.timestamp : null}
-              nextBreakIn={breakStatus?.secondsRemaining ?? null}
+              bidsUntilBreak={bidsUntilBreak}
             />
 
             <BidHistory bids={bids} maxHeight="50vh" />
@@ -236,7 +319,7 @@ function LiveAuctionRoom() {
           isHost={isHost}
           breakStatus={breakStatus}
           teams={teams}
-          squadRequirements={[]}
+          squadRequirements={squadRequirements}
           onBreakEnded={() => void refetch()}
           onExtendBreak={async (s) => {
             await extendBreak(s);

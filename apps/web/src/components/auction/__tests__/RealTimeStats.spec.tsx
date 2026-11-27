@@ -22,21 +22,21 @@ describe('RealTimeStats', () => {
     vi.useRealTimers();
   });
 
-  it('displays bid count, time since last bid, and next break countdown', () => {
+  it('displays bid count, time since last bid, and bids until the next break', () => {
     const lastBid = Date.now() - 65_000; // 65s ago
     render(
-      <RealTimeStats bidCount={4} lastBidTimestamp={lastBid} nextBreakIn={90} />
+      <RealTimeStats bidCount={4} lastBidTimestamp={lastBid} bidsUntilBreak={3} />
     );
 
     expect(screen.getByText('4')).toBeTruthy();
     expect(screen.getByText('01:05')).toBeTruthy(); // since last bid
-    expect(screen.getByText('01:30')).toBeTruthy(); // next break
+    expect(screen.getByText('3 bids')).toBeTruthy(); // next break
   });
 
-  it('ticks the counters every second', () => {
+  it('ticks the elapsed counter every second', () => {
     const lastBid = Date.now() - 65_000;
     render(
-      <RealTimeStats bidCount={1} lastBidTimestamp={lastBid} nextBreakIn={90} />
+      <RealTimeStats bidCount={1} lastBidTimestamp={lastBid} bidsUntilBreak={4} />
     );
 
     act(() => {
@@ -44,12 +44,18 @@ describe('RealTimeStats', () => {
     });
 
     expect(screen.getByText('01:06')).toBeTruthy(); // since last bid +1s
-    expect(screen.getByText('01:29')).toBeTruthy(); // break -1s
   });
 
-  it('shows an em dash when there is no last bid or break scheduled', () => {
+  it('singularises the last bid before a break', () => {
     render(
-      <RealTimeStats bidCount={0} lastBidTimestamp={null} nextBreakIn={null} />
+      <RealTimeStats bidCount={9} lastBidTimestamp={null} bidsUntilBreak={1} />
+    );
+    expect(screen.getByText('1 bid')).toBeTruthy();
+  });
+
+  it('shows an em dash when there is no last bid or break cadence', () => {
+    render(
+      <RealTimeStats bidCount={0} lastBidTimestamp={null} bidsUntilBreak={null} />
     );
     expect(screen.getAllByText('—').length).toBe(2);
   });

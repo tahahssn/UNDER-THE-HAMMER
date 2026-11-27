@@ -2,11 +2,13 @@
  * Live auction journey — integration ("E2E") test.
  *
  * The project has no browser E2E runner (Playwright/Cypress) wired up, so this
- * exercises the full user journey at the hook-integration level with a mocked
- * socket and fetch: place a valid bid → watch it accepted in real time →
- * leading team/purse update → break transition → reconnect and resume. This is
- * the closest faithful reproduction of the journey the task describes that the
- * current test harness supports.
+ * exercises the full user journey at the hook-integration level against the
+ * REAL transport contract: a bid is placed by emitting the gateway message
+ * `bid:submit`, and the server answers with `bid:accepted` carrying the echoed
+ * idempotency key. Player advancement and squad/purse updates arrive via
+ * `room:snapshot` (requested after `player:sold`), exactly as the Phase I
+ * backend broadcasts them — so this test fails if the frontend drifts back to
+ * an HTTP `/bids` call or to events the backend never emits.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
@@ -35,21 +37,16 @@ let socket: ReturnType<typeof makeSocket>;
 
 beforeEach(() => {
   socket = makeSocket();
-  (useSocket as any).mockReturnValue(socket);
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ accepted: true }) })
-  );
+  (useSocket as unknown as ReturnType<typeof vi.fn>).mockReturnValue(socket);
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
 describe('live auction journey', () => {
-  it('places a bid, sees acceptance, a break, then reconnects and resumes', async () => {
+  it('places a bid over the socket, sees acceptance, a break, then reconnects', async () => {
     const realTime = renderHook(() =>
       useAuctionRealTime('a1', {
         initialPlayer: {
@@ -71,18 +68,21 @@ describe('live auction journey', () => {
       useBidPlacement({
         auctionId: 'a1',
         teamId: 't1',
+        auctionPlayerId: 'p1',
+        stateVersion: 1,
         onOptimistic: (b) =>
           realTime.result.current.addOptimisticBid(b, 'My Team'),
       })
     );
 
-    // 1. Place a valid bid — optimistic pending entry appears immediately.
-    let key = '';
+    // 1. Place a valid bid — emitted as bid:submit, optimistic pending appears.
     await act(async () => {
       await bid.result.current.submitBid(15_000_000);
     });
-    key = bid.result.current.lastIdempotencyKey ?? '';
-    expect(key).not.toBe('');
+    const [event, payload] = socket.emit.mock.calls[0];
+    expect(event).toBe('bid:submit');
+    const key = (payload as { idempotencyKey: string }).idempotencyKey;
+    expect(key).toBeTruthy();
     expect(realTime.result.current.bids).toHaveLength(1);
     expect(realTime.result.current.bids[0].status).toBe('pending');
 
@@ -92,7 +92,7 @@ describe('live auction journey', () => {
         bidId: 'b1',
         teamId: 't1',
         teamName: 'My Team',
-        amountMinor: 15_000_000,
+        amountMinor: '15000000',
         idempotencyKey: key,
       });
     });
@@ -100,13 +100,29 @@ describe('live auction journey', () => {
     expect(realTime.result.current.bids[0].status).toBe('accepted');
     expect(realTime.result.current.currentPlayer?.leadingTeam?.amountMinor).toBe(15_000_000);
 
-    // 3. Squad/purse update propagates to standings.
-    act(() => {
-      socket._emit('squad:updated', { auctionTeamId: 't1', totalAcquisitions: 4 });
+    // 3. Player sold → a fresh snapshot is requested, advancing player + purse.
+    act(() => socket._emit('player:sold', { auctionPlayerId: 'p1', teamId: 't1' }));
+    expect(socket.emit).toHaveBeenCalledWith('auction:request-snapshot', {
+      auctionId: 'a1',
     });
-    expect(
-      realTime.result.current.teams.find((t) => t.id === 't1')?.squadCount
-    ).toBe(4);
+    act(() => {
+      socket._emit('room:snapshot', {
+        currentPlayerId: 'p2',
+        currentPlayer: { id: 'p2', name: 'Next Player', category: 'Gold' },
+        teams: [
+          {
+            id: 't1',
+            name: 'My Team',
+            purseBalanceMinor: '185000000',
+            acquisitions: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
+          },
+        ],
+        breakActive: false,
+      });
+    });
+    expect(realTime.result.current.currentPlayer?.name).toBe('Next Player');
+    expect(realTime.result.current.teams.find((t) => t.id === 't1')?.purse).toBe(185_000_000);
+    expect(realTime.result.current.teams.find((t) => t.id === 't1')?.squadCount).toBe(4);
 
     // 4. Break transition.
     act(() => socket._emit('break:started', {}));
@@ -121,16 +137,15 @@ describe('live auction journey', () => {
     });
     act(() => {
       socket._emit('room:snapshot', {
-        currentPlayer: {
-          id: 'p2',
-          name: 'Resumed Player',
-          role: 'Bowler',
-          category: 'Gold',
-          basePriceMinor: 8_000_000,
-          currency: 'PKR',
-        },
+        currentPlayerId: 'p3',
+        currentPlayer: { id: 'p3', name: 'Resumed Player', category: 'Gold' },
         teams: [
-          { id: 't1', name: 'My Team', purse: 185_000_000, squadCount: 4, maxSquadSize: 15 },
+          {
+            id: 't1',
+            name: 'My Team',
+            purseBalanceMinor: '185000000',
+            acquisitions: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
+          },
         ],
         breakActive: false,
       });
@@ -138,8 +153,5 @@ describe('live auction journey', () => {
     await waitFor(() =>
       expect(realTime.result.current.currentPlayer?.name).toBe('Resumed Player')
     );
-    expect(
-      realTime.result.current.teams.find((t) => t.id === 't1')?.purse
-    ).toBe(185_000_000);
   });
 });
