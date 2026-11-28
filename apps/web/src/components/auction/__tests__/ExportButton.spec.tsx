@@ -8,7 +8,7 @@ vi.mock('../../hooks/useSquadExport', () => ({
   useSquadExport: vi.fn(),
 }));
 
-import * as useSquadExportModule from '../../hooks/useSquadExport';
+import * as useSquadExportModule from '../../../hooks/useSquadExport';
 
 describe('ExportButton', () => {
   const defaultProps = {

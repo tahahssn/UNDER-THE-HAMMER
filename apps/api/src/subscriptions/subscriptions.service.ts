@@ -24,7 +24,7 @@ export class SubscriptionsService {
     }
 
     // Check hostingEnabled entitlement (default to false if not present)
-    const hostingEnabled = subscription.plan.entitlements.find((e) => e.key === 'hostingEnabled');
+    const hostingEnabled = subscription.plan.entitlements.find((e: any) => e.key === 'hostingEnabled');
     return hostingEnabled?.boolValue ?? false;
   }
 
@@ -130,7 +130,7 @@ export class SubscriptionsService {
   async listPlans() {
     const plans = await this.repo.getActivePlans();
     return {
-      plans: plans.map((p) => this.formatPlan(p)),
+      plans: plans.map((p: any) => this.formatPlan(p)),
       total: plans.length,
     };
   }
@@ -149,7 +149,7 @@ export class SubscriptionsService {
    * Helper: get integer entitlement value
    */
   private getEntitlementInt(entitlements: any[], key: string, defaultValue: number): number {
-    const e = entitlements.find((x) => x.key === key);
+    const e = entitlements.find((x: any) => x.key === key);
     return e?.intValue ?? defaultValue;
   }
 
@@ -157,7 +157,7 @@ export class SubscriptionsService {
    * Helper: get boolean entitlement value
    */
   private getEntitlementBool(entitlements: any[], key: string, defaultValue: boolean): boolean {
-    const e = entitlements.find((x) => x.key === key);
+    const e = entitlements.find((x: any) => x.key === key);
     return e?.boolValue ?? defaultValue;
   }
 

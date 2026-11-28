@@ -2,16 +2,16 @@
   "extends": "../../packages/config/tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "./src",
     "baseUrl": ".",
     "paths": {
       "@uth/contracts": ["../../packages/contracts/src/index.ts"],
-      "@uth/contracts/*": ["../../packages/contracts/src/*"]
+      "@uth/contracts/*": ["../../packages/contracts/src/*"],
+      "@uth/database": ["../../packages/database/dist/index.js"]
     },
     "types": ["node", "vitest/globals"],
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "../../packages/contracts/src/**/*.ts"],
   "exclude": ["src/**/__tests__/**", "src/**/*.spec.ts", "node_modules"]
 }

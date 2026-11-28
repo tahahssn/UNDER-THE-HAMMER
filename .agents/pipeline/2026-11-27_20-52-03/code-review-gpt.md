@@ -1,146 +1,152 @@
-# CSV and XLSX squad exports for auction participants
+# CSV and XLSX squad exports for auction hosts and team owners
 
-Phase K adds an authenticated export endpoint, server-side CSV/XLSX generation, shared export types, and a React download control for completed squads. The approach keeps monetary values in minor units, generates files in memory, and checks host or active-owner entitlement before reading squad data. **Confirmed:** the implementation does not build or run against the repository’s contracts and Prisma schema, and the frontend control is not connected to a mounted page. **Confirmed:** active team owners can also receive every team’s roster instead of only their own.
+## Summary
 
-Watch for: **confirmed** Prisma/schema and module-resolution blockers; **confirmed** cross-team disclosure to team owners; **confirmed** unreachable and unauthenticated frontend flow; **confirmed** non-executing tests and unsupported coverage claims.
+Phase K adds a guarded export endpoint, server-side CSV/XLSX generation, shared contracts, and a React download control. Owner-scoped filtering, integer money strings, and formula treatment for team and player names are useful additions. The feature is not shippable because authenticated requests do not resolve to internal user IDs, the Prisma query still contains nonexistent fields, and no authenticated mounted frontend flow reaches the endpoint. All targeted suites collect zero tests, so the stated 45+ tests and greater-than-85% coverage have not been demonstrated.
+
+Watch for: **confirmed** authenticated host and owner requests cannot pass the new identity boundary; **confirmed** the export query is rejected by the canonical Prisma schema; **confirmed** route, package, UI, and token wiring prevent a browser download; **confirmed** required purse and compliance data is missing; **confirmed** all targeted test suites collect zero tests.
 
 **Verdict**: NEEDS_CHANGES
 
 ## High-level view
 
-**Confirmed:** The service/controller split is clear, but the Prisma query targets fields and relations that do not exist in the canonical schema. Host lookup, player mapping, compliance lookup and purse aggregation all need to be rebuilt from typed Prisma payloads.
+**Confirmed:** Owner-scoped filtering is present, but the controller passes a JWT payload where the service expects an internal `User.id`. The database stores the Cognito subject separately in `UserIdentity.subject`, so authorization fails before the scope can work.
 
-**Confirmed:** `@uth/contracts` is not configured as a resolvable workspace package or alias, so API and web typechecks fail and the test suites collect no tests. Papa Parse and ExcelJS typing errors plus explicit `any` values also violate the strict-type requirement.
+**Confirmed:** `SquadExportService` bypasses its Prisma boundary with `any`, hiding two remaining schema mismatches. Its payload also omits initial purse, category spend, and the auction-specific player category.
 
-**Confirmed:** Any active owner passes authorization, then the service fetches all auction teams. Host exports may contain the whole auction; an owner export must be filtered to that owner’s team.
+**Confirmed:** CSV and XLSX use separate column definitions. They expose different headers, the workbook uses the wrong sheet name, and CSV formula protection does not cover owner display names.
 
-**Confirmed:** Separate, non-transactional reads can mix acquisitions, validations and purse balances from different moments. The generated rows also omit required purse allocation and category-spend data and flatten compliance into a string that disagrees with the shared contract.
+**Confirmed:** The effective Nest route does not match the requested route, `SquadTab` is not mounted, and the hook reads a local-storage token while the application stores its token in the shared API module.
 
-**Confirmed:** CSV cells are quoted but not protected from spreadsheet formulas. User- or provider-controlled values beginning with `=`, `+`, `-` or `@` can be interpreted as formulas when opened in spreadsheet software.
-
-**Confirmed:** `SquadTab` has no production consumer, and the hook reads a local-storage token even though the application keeps its JWT in memory. The current frontend path therefore cannot offer an authenticated download.
-
-**Confirmed:** The download UI misses the required filename, success-feedback and 44 px mobile-target behavior. The branch also mixes Phase K with unrelated notification, payment, subscription and pipeline work, which should be separated before merge.
+**Confirmed:** The shared contract does not resolve for either Vitest runner, and the API fails type checking on the new service. The four targeted files declare 66 tests, but none execute; the backend mocks also describe the pre-fix service shape.
 
 <details>
 <summary>Issues (17)</summary>
 
-1. **Prisma model mismatch (confirmed)** — The export query references nonexistent auction, player, validation, violation and ledger fields. Rebuild it from the generated Prisma types and canonical relations.
-2. **Shared contract package missing (confirmed)** — `@uth/contracts` cannot resolve in either app. Configure a real workspace package or a consistent TypeScript/Next/Vitest alias.
-3. **Strict export types broken (confirmed)** — Papa Parse declarations are missing, ExcelJS APIs are typed incorrectly and production export files use explicit `any`. Add the declarations and replace casts with concrete types.
-4. **Owner scope not filtered (confirmed)** — Any active owner receives every team’s roster and purse data. Restrict owner exports to the owner’s auction team and reserve full-auction exports for hosts.
-5. **Non-atomic export snapshot (confirmed)** — Separate reads can combine acquisitions, validations and balances from different states. Fetch the export in one read transaction or one consistent query.
-6. **Required export data missing (confirmed)** — Initial purse, category spend and complete compliance details are absent, and the service output disagrees with `SquadExportResponse`. Define and populate one authoritative export DTO.
-7. **CSV/XLSX schemas diverge (confirmed)** — The formats use different headers and the workbook has the wrong sheet name. Generate both from one column definition.
-8. **CSV formula injection (confirmed)** — User-controlled cells are quoted but not formula-escaped. Neutralize `=`, `+`, `-` and `@` prefixes and test them.
-9. **Squad export UI is unmounted (confirmed)** — No production route consumes `SquadTab`. Integrate it into the real squad view with server-derived phase and role data.
-10. **Authentication token source mismatch (confirmed)** — The hook reads local storage while the app keeps the JWT in memory. Reuse the authenticated API client or `getAuthToken()`.
-11. **Export request validation gap (confirmed)** — The endpoint uses manual format checks and accepts an unvalidated auction id. Apply the shared Zod schema for format and UUID validation.
-12. **Internal failures are unlogged (confirmed)** — Unexpected generator and database errors become generic 500 responses without server diagnostics. Log the cause and request context before returning the safe error.
-13. **Filename contract ignored (confirmed)** — `roomName` is unused, the client ignores `Content-Disposition`, and the server omits the auction name. Make the server’s auction/room/date filename authoritative.
-14. **Mobile and success states incomplete (confirmed)** — Buttons miss the 44 px touch target and no success confirmation exists. Add minimum height, feedback, focus treatment and viewport tests.
-15. **Test suites collect zero tests (confirmed)** — Module resolution prevents all targeted suites from running, so the >85% claim has no result behind it. Fix test resolution/setup and publish coverage.
-16. **Format and authorization tests are too shallow (confirmed)** — XLSX tests only check a ZIP signature, controller tests bypass guards, and E2E/responsive coverage is absent. Parse workbooks and add HTTP and browser-level tests.
-17. **Unrelated changes are bundled (confirmed)** — Notification, payment, subscription and pipeline work shares the branch with Phase K. Isolate the export feature before merge.
+1. **Internal identity mismatch (confirmed)** — `@CurrentUser('sub')` supplies the full JWT payload, and a Cognito subject is not the internal `User.id` used by room and team ownership. Resolve the subject to an internal user before authorization.
+2. **Invalid Prisma export query (confirmed)** — The query orders acquisitions by nonexistent `createdAt` and selects nonexistent `User.displayName`, so exports return 500. Use `settledAt`, join `UserProfile`, and type the payload against generated Prisma types.
+3. **Authorization snapshot gap (confirmed)** — Authorization, filename metadata, and export rows are loaded in separate reads, while `ReadCommitted` does not preserve one snapshot. Perform authorization and data retrieval once in a repeatable-read transaction or joined query.
+4. **Missing purse and auction-category data (confirmed)** — The files omit initial purse and category spend and read the global player category instead of the auction-specific category. Add the required values to one authoritative DTO.
+5. **False compliance status (confirmed)** — An unvalidated squad is labeled compliant and `SquadValidation.valid` is ignored. Represent the unvalidated state and use the stored validation result.
+6. **CSV/XLSX schema divergence (confirmed)** — CSV uses camelCase headers and XLSX uses display labels, while the sheet is named `Squad` rather than `Squad Export`. Generate both from one column definition.
+7. **Owner-name formula injection (confirmed)** — Owner display names are written to CSV without formula neutralization. Escape every string cell at serialization and test `=`, `+`, `-`, and `@` prefixes.
+8. **Route contract mismatch (confirmed)** — Nest versioning and the hard-coded controller prefix produce a doubled version path, while the browser calls an unproxied `/api/v1` path. Use a version-neutral controller path and the configured API base.
+9. **UUID validation gap (confirmed)** — `auctionId` bypasses the required Zod validation and invalid UUIDs can become database 500 responses. Validate route and query parameters at the controller boundary.
+10. **Unmounted export UI (confirmed)** — No production page renders `SquadTab` or `ExportButton`. Mount the control in the real squad view with server-derived phase and role hints.
+11. **Wrong frontend token source (confirmed)** — The hook reads local storage, but sign-in stores the token in the shared API module. Reuse `getAuthToken()` or the authenticated client.
+12. **Filename contract ignored (confirmed)** — The hook discards `Content-Disposition`, generates a competing filename, and never uses `roomName`. Use the server-authoritative filename.
+13. **Missing success and mobile states (confirmed)** — The UI has no success confirmation and its approximately 36 px buttons miss the 44 px touch target. Add success status, minimum height, and responsive tests.
+14. **Unlinked shared contracts package (confirmed)** — Neither app declares `@uth/contracts`, and Vitest cannot resolve it. Add workspace dependencies, build ordering, and test resolution.
+15. **Strict TypeScript escapes (confirmed)** — Production export code uses `@ts-ignore` and multiple explicit `any` values. Install the missing declarations and replace the escapes with Prisma, ExcelJS, and squad DTO types.
+16. **Non-executing coverage suite (confirmed)** — All four targeted suites collect zero tests, backend mocks are stale, and XLSX/guard/browser behavior is not exercised. Repair the suites and publish measured coverage above 85%.
+17. **Mixed feature scope (confirmed)** — The branch includes live-auction, notification, payment, subscription, generated contract, and pipeline work alongside Phase K. Isolate the export feature and its direct dependencies before merge.
 
 </details>
 
 <details>
 <summary>Details</summary>
 
-## Export generation does not match the Prisma model
+## JWT claims never become the internal user ID used by auction ownership
 
-**Confidence: confirmed.** The service selects `Auction.hostId` and `Auction.name` (`apps/api/src/auctions/services/squad-export.service.ts:30-59`), but `Auction` only owns a room relation (`packages/database/prisma/schema/auction.prisma:38-62`); `hostId` and `name` live on `AuctionRoom` (`packages/database/prisma/schema/rooms.prisma:82-86`).
+**Confidence: confirmed.** `exportSquad` declares `@CurrentUser('sub') userId: string` (`apps/api/src/auctions/auctions.controller.ts:198-202`), but `CurrentUser` ignores its selector and returns the complete JWT payload (`apps/api/src/auth/current-user.decorator.ts:13-15`). The service compares that object with `AuctionRoom.hostId` and passes it into the UUID-valued `TeamOwner.userId` filter (`squad-export.service.ts:43-65`). A host cannot match, and an owner lookup receives the wrong value type.
 
-**Confidence: confirmed.** It also selects `Player.name` and scalar `Player.category`, includes `AuctionTeam.squadValidations`, sums `TeamPurseTransaction.amountChangeMinor`, and reads `violation.ruleType` (`squad-export.service.ts:66-99,255-265`). The schema exposes `Player.fullName`/`displayName` and a category relation, `AuctionTeam.validations`, `TeamPurseTransaction.amountMinor`, and `SquadViolation.violationType`. Replace the mocked shape with a typed Prisma payload from the canonical schema.
+**Confidence: confirmed.** Selecting `payload.sub` would still use the wrong identifier. Cognito's `sub` is `UserIdentity.subject`, while `AuctionRoom.hostId` and `TeamOwner.userId` reference the separate internal `User.id` (`packages/database/prisma/schema/identity.prisma:17-27,85-97`; `squads.prisma:38-49`). Resolve the subject once at the authentication boundary and pass the resulting `User.id` to authorization.
 
 ```text
-GET /v1/auctions/:id/export
-        |
-        v
-verify authorization --X--> Auction.hostId
-        |
-        v
-read export data ------X--> Auction.name / Player.name /
-                          AuctionTeam.squadValidations /
-                          amountChangeMinor
+Cognito JWT
+  `sub` -> UserIdentity.subject -> UserIdentity.userId
+                                      |
+                                      v
+                         AuctionRoom.hostId / TeamOwner.userId
 ```
 
-## Shared contracts and strict compilation are broken
+## The export query still cannot execute against the canonical Prisma schema
 
-**Confidence: confirmed.** The controller, service, hook and component import `@uth/contracts`, but `packages/contracts` has no `package.json`, workspace identity or TypeScript path mapping. Both package typechecks report `TS2307`, and the targeted Vitest commands collect zero tests because Vite cannot resolve the module. Configure a real shared package or one alias used consistently by TypeScript, Next and Vitest.
+**Confidence: confirmed.** The acquisition include sorts by `createdAt` (`squad-export.service.ts:107-124`), but `PlayerAcquisition` has `settledAt` and no `createdAt` (`packages/database/prisma/schema/auction.prisma:207-225`). The owner include selects `user.displayName` (`squad-export.service.ts:125-129`), but `displayName` belongs to `UserProfile`; `User` exposes `username`, `email`, and a `profile` relation (`identity.prisma:17-27,100-109`). Prisma rejects the query before reading rows, so exports return 500.
 
-**Confidence: confirmed.** API typecheck also reports missing `papaparse` declarations, invalid `Cell.columnNumber` access and an unsafe ExcelJS buffer conversion. Production code uses `as any` for ExcelJS values and `any` for compliance and squad player data. Add the correct declarations, use ExcelJS’s actual types, and remove these escapes.
+**Confidence: confirmed.** `tx: any`, `team: any`, `owner: any`, and `acq: any` suppress the checks that would expose these errors (`squad-export.service.ts:85,159-167`). API typecheck also reports that `auctionRoom`, `teamOwner`, and `$transaction` do not exist on the installed client at lines 43, 59, and 84. Regenerate the client from the assembled schema, define a `Prisma.*GetPayload`, correct the relations, and remove the escapes.
 
-## Owner authorization exposes competitors’ squads
+## Authorization and file generation do not share one snapshot
 
-**Confidence: confirmed.** `verifyExportAuthorization` accepts any active owner (`squad-export.service.ts:26-50`), then `getSquadExportData` fetches every team for the auction (`squad-export.service.ts:66-90`). The file includes competitor owners, acquisitions, balances and compliance. Return the authorized team id and filter owner exports to it; reserve full-auction exports for the host and test this boundary over HTTP.
+**Confidence: confirmed.** The controller authorizes and loads export data for the filename, then each format method repeats authorization and reloads the data (`auctions.controller.ts:218-238`; `squad-export.service.ts:182-184,232-234`). Authorization also occurs outside the data transaction, leaving a release or host change between check and read as a time-of-check/time-of-use gap.
 
-## Snapshot and row contracts lose required information
+**Confidence: confirmed.** `ReadCommitted` permits the transaction's metadata and team queries to observe different committed states (`squad-export.service.ts:84-179`). Return authorization scope, metadata, and rows from one repeatable-read transaction or joined query, then generate the file and filename from that result.
 
-**Confidence: confirmed.** Authorization, metadata, teams/acquisitions and ledger sums use separate Prisma calls without `$transaction` (`squad-export.service.ts:26-101`). Because the endpoint does not require a concluded phase, settlement can produce a mixed-state file between those reads. Use one read transaction or one query that captures a consistent snapshot.
+## Purse usage, category assignment, and compliance are incomplete
 
-**Confidence: confirmed.** Both formats omit initial purse allocation and spend by category, while compliance becomes `Compliant`, `Unknown` or a partial violation string. `SquadExportResponse` declares structured compliance instead (`packages/contracts/src/exports.contract.ts:37-45`). Define one export DTO with allocated, spent and remaining purse plus complete violations, then generate both formats from it.
+**Confidence: confirmed.** The response exposes acquisition price and remaining purse only (`packages/contracts/src/exports.contract.ts:40-47`). It omits `AuctionTeam.purseInitialMinor` and spend grouped by category, although the accepted contract requires allocated, category spend, and remaining values. Add them to one authoritative export DTO.
 
-**Confidence: confirmed.** XLSX names the sheet `Squad` instead of `Squad Export`, while CSV exposes camelCase object keys rather than the human-readable XLSX headers. Use one column definition for both formats.
+**Confidence: confirmed.** The query exports `Player.category` instead of `AuctionPlayer.category` (`squad-export.service.ts:107-121`). Because the schema permits auction-specific reclassification (`auction.prisma:146-165`), the exported category can be wrong.
 
-## CSV crosses the spreadsheet trust boundary unsafely
+**Confidence: confirmed.** A team with no validation becomes `{ valid: true }` and then `Compliant`; the formatter also ignores `SquadValidation.valid` (`squad-export.service.ts:327-358`). Represent an unvalidated squad explicitly and use the snapshot's `valid` value.
 
-**Confidence: confirmed.** `Papa.unparse` enables quoting but not formula escaping (`squad-export.service.ts:163-169`). Quoting alone does not neutralize formula prefixes in spreadsheet applications. Enable Papa Parse formula escaping or prefix dangerous leading characters, with tests for all four prefixes and ordinary Unicode values.
+## CSV and XLSX disagree and formula protection is incomplete
 
-## The frontend export path is not usable
+**Confidence: confirmed.** Papa Parse derives CSV headers from camelCase object keys, while XLSX uses human-readable labels (`squad-export.service.ts:15-25,218-224,240-250`). The workbook is `Squad` instead of the required `Squad Export` (`squad-export.service.ts:237-239`). Generate both formats from one ordered column definition.
 
-**Confidence: confirmed.** Production references to `SquadTab` and `ExportButton` end inside the new component files; no route or existing squad display mounts `SquadTab`. Integrate it into the actual squad view using server-derived phase and role information.
+**Confidence: confirmed.** Team and player names are escaped, but owner display names are joined directly into CSV cells (`squad-export.service.ts:191-212`). A user-controlled value beginning with `=`, `+`, `-`, or `@` remains executable when opened in a spreadsheet. Neutralize every string cell at serialization and test all prefixes.
 
-**Confidence: confirmed.** `useSquadExport` reads `localStorage.getItem('token')` (`apps/web/src/hooks/useSquadExport.ts:39`), while the app stores the JWT in the module-level API client (`apps/web/src/lib/api.ts:25-32`; `apps/web/src/contexts/AuthContext.tsx:53,75`). Reuse `getAuthToken()` or the authenticated API client.
+## The public endpoint and browser request target different routes
+
+**Confidence: confirmed.** URI versioning adds `/v1` (`apps/api/src/main.ts:24`), while the controller hard-codes `v1/auctions` (`auctions.controller.ts:18`), placing the new handler under a doubled version prefix rather than `GET /v1/auctions/:id/export`. The hook calls `/api/v1/auctions/...`, and `apps/web/next.config.js` has no `/api` rewrite despite the existing `API_CONFIG.baseUrl`.
+
+**Confidence: confirmed.** The controller lowercases `format` but never validates `auctionId` as a UUID or uses the required shared Zod schema (`auctions.controller.ts:197-216`). An invalid identifier can become a database 500. Use a version-neutral controller path, the configured API client, and boundary validation for both parameters.
+
+## The export control is unmounted and reads the wrong token store
+
+**Confidence: confirmed.** Production references to `SquadTab` and `ExportButton` end inside the new component files; no route mounts them. `isAuctionCompleted` and `isAuthorized` therefore never come from server-derived auction state (`apps/web/src/components/auction/SquadTab.tsx:27-48`). Integrate the control into the real squad view while retaining server enforcement.
+
+**Confidence: confirmed.** `useSquadExport` reads `localStorage.getItem('token')` (`apps/web/src/hooks/useSquadExport.ts:38-46`), while sign-in stores the token in module memory through `setAuthToken` (`apps/web/src/lib/api.ts:22-32`; `apps/web/src/contexts/AuthContext.tsx:45-76`). Signed-in users receive `Authentication required`. Reuse `getAuthToken()` or the authenticated API client.
 
 ```text
 Mounted squad page --X--> SquadTab --> ExportButton --> useSquadExport
-                                                     |
-                                                     X localStorage token
-                                                       (JWT is in memory)
+                                                        |
+                                                        X localStorage token
+                                                          (actual token is in api.ts)
 ```
 
-## Request, failure and download behavior miss the contract
+## Filename, success, and mobile behavior miss the UI contract
 
-**Confidence: confirmed.** The endpoint manually checks a raw format string and does not validate `auctionId` as a UUID (`apps/api/src/auctions/auctions.controller.ts:195-208`). Apply the required shared Zod query/parameter schema at the controller boundary.
+**Confidence: confirmed.** The server creates a filename with room and auction metadata, but the hook ignores `Content-Disposition`, generates a different name, and never uses `roomName` (`useSquadExport.ts:12-31,60-75`). Parse and use the server-authoritative filename.
 
-**Confidence: confirmed.** Unexpected errors become a generic 500 without logging the original cause (`auctions.controller.ts:228-237`). Log the error with auction id, format and correlation metadata before returning the safe response.
+**Confidence: confirmed.** The hook exposes no success state, and the component shows no confirmation (`useSquadExport.ts:6-10,77-90`; `ExportButton.tsx:98-106`). `text-sm py-2` produces an approximately 36 px button instead of the required 44 px touch target (`ExportButton.tsx:60-95`). Add success feedback, `min-h-[44px]`, status semantics, and viewport coverage at 375, 768, 1024, and 1440 px.
 
-**Confidence: confirmed.** `roomName` is unused, the client ignores `Content-Disposition`, and the controller calls `generateFilename` without an auction name. Make the server’s auction/room/date filename authoritative and use it for the browser download.
+## Shared contracts are not consumable as a workspace dependency
 
-**Confidence: confirmed.** The component has no success confirmation, and `text-sm py-2` produces an approximately 36 px mobile button instead of the required 44 px touch target. Add success feedback, `min-h-[44px]`, visible focus treatment and viewport tests at 375, 768, 1024 and 1440 px.
+**Confidence: confirmed.** Both apps import `@uth/contracts`, but neither declares it in `package.json`, no workspace link exists under either app, and both Vitest configurations lack an alias. The API points TypeScript directly outside the app rather than consuming a built package. Both targeted runners stop during collection with `Failed to resolve import "@uth/contracts"`.
 
-## The test count does not establish coverage
+**Confidence: confirmed.** Production code suppresses Papa Parse types and uses `any` for Prisma and ExcelJS (`squad-export.service.ts:10,85,159-167,255,261,307,327-337`); `SquadTab` also declares `player: any` (`SquadTab.tsx:11-16`). Add `@uth/contracts: workspace:*` to consumers, build it before the apps, add test resolution, install Papa Parse declarations, and replace the `any` values.
 
-**Confidence: confirmed.** The files declare 66 tests, but both targeted backend and frontend commands fail during collection on unresolved `@uth/contracts`; zero execute. Web typecheck also finds the component test’s wrong hook path, missing DOM matcher typings and unsupported `toEndWith` assertions. Fix the test setup and publish a real coverage result before claiming more than 85%.
+## Sixty-six declared tests provide no executed coverage
 
-**Confidence: confirmed.** The sole XLSX content test only checks the ZIP `PK` signature (`squad-export.service.spec.ts:327-372`). Controller tests call the class directly, so they skip `JwtGuard`, HTTP behavior and unauthenticated access; no export E2E or responsive test exists. Reopen generated workbooks for structural assertions and add Nest HTTP and mounted browser tests.
+**Confidence: confirmed.** The two API and two web suites each collect zero tests because contract resolution fails. Current working-tree matcher, DOM setup, and import fixes make `pnpm --filter @uth/web typecheck` pass, but do not make Vitest resolve the package. No coverage percentage can be inferred.
 
-## Phase K is bundled with unrelated work
+**Confidence: confirmed.** Backend suites use Jest globals under Vitest, mock `auction.findUnique` instead of `auctionRoom.findFirst`, omit `$transaction`, expect authorization to resolve `undefined`, and omit the controller's new metadata calls (`squad-export.service.spec.ts:12-25,47-68`; `squad-export.controller.spec.ts:13-17,66-90`). The XLSX test checks only the ZIP signature, and direct controller calls do not exercise `JwtGuard`, HTTP routing, unauthenticated access, or responsive behavior. Rebuild the tests around typed payloads, parse generated workbooks, add HTTP and browser tests, and publish measured coverage above 85%.
 
-**Confidence: confirmed.** The branch diff includes notification, SafePay/payment, subscription and pipeline changes alongside exports, and the current uncommitted diff contains subscription work only. Split Phase K into a focused change so its dependencies, behavior and verification can be reviewed independently.
+## Phase K is mixed with other product phases
+
+**Confidence: confirmed.** The branch-level change set includes live-auction, notification, payment, subscription, generated contract, and pipeline work alongside squad exports. Isolate Phase K and its direct dependency/configuration changes before merge.
 
 </details>
 
 <details>
 <summary>File map</summary>
 
-- `apps/api/package.json` — adds Papa Parse and ExcelJS.
-- `apps/api/src/auctions/services/squad-export.service.ts` — authorizes and generates squad files.
-- `apps/api/src/auctions/auctions.controller.ts` — exposes the export route and response headers.
-- `apps/api/src/auctions/auctions.module.ts` — registers the service.
-- `apps/api/src/auctions/__tests__/squad-export.service.spec.ts` — mocks service behavior.
-- `apps/api/src/auctions/__tests__/squad-export.controller.spec.ts` — tests controller dispatch directly.
-- `packages/contracts/src/exports.contract.ts` — defines export types.
-- `packages/contracts/src/index.ts` — re-exports those types.
-- `apps/web/src/hooks/useSquadExport.ts` — fetches a blob and starts a download.
-- `apps/web/src/components/auction/ExportButton.tsx` — renders format actions and states.
-- `apps/web/src/components/auction/SquadTab.tsx` — combines squad display and export controls.
-- `apps/web/src/hooks/__tests__/useSquadExport.spec.ts` — mocks fetch and downloads.
-- `apps/web/src/components/auction/__tests__/ExportButton.spec.tsx` — tests component interactions.
-- `pnpm-lock.yaml` — locks export dependencies.
+- `apps/api/src/auctions/services/squad-export.service.ts` — authorizes scope, loads squad data, and generates CSV/XLSX files.
+- `apps/api/src/auctions/auctions.controller.ts` — exposes the guarded download endpoint and headers.
+- `apps/api/src/auctions/auctions.module.ts` — registers the export service.
+- `apps/api/src/auctions/__tests__/squad-export.service.spec.ts` — declares tests against an obsolete mock shape.
+- `apps/api/src/auctions/__tests__/squad-export.controller.spec.ts` — declares direct controller tests without the guard or current metadata calls.
+- `apps/api/package.json` and `apps/api/tsconfig.json` — add generator dependencies and contract source aliases.
+- `packages/contracts/src/exports.contract.ts` and `packages/contracts/src/index.ts` — define and publish export types.
+- `packages/contracts/package.json`, `packages/contracts/tsconfig.json`, and `packages/contracts/src/teams.contract.ts` — establish the contract package and resolve a working-tree re-export conflict.
+- `apps/web/src/hooks/useSquadExport.ts` — fetches a blob and initiates download.
+- `apps/web/src/components/auction/ExportButton.tsx` — renders format actions and loading/error states.
+- `apps/web/src/components/auction/SquadTab.tsx` — composes squad display with export controls.
+- `apps/web/src/hooks/__tests__/useSquadExport.spec.ts` and `apps/web/src/components/auction/__tests__/ExportButton.spec.tsx` — declare hook and component tests.
+- `apps/web/vitest.config.ts`, `apps/web/vitest.setup.ts`, and `apps/web/package.json` — add working-tree test setup and dependencies.
+- `pnpm-lock.yaml` — locks generator and concurrent workspace dependencies.
 
-Full feature diff, including any working-tree edits on these paths: `git diff origin/main -- apps/api/package.json apps/api/src/auctions/auctions.controller.ts apps/api/src/auctions/auctions.module.ts apps/api/src/auctions/services/squad-export.service.ts apps/api/src/auctions/__tests__/squad-export.controller.spec.ts apps/api/src/auctions/__tests__/squad-export.service.spec.ts apps/web/src/components/auction/ExportButton.tsx apps/web/src/components/auction/SquadTab.tsx apps/web/src/components/auction/__tests__/ExportButton.spec.tsx apps/web/src/hooks/useSquadExport.ts apps/web/src/hooks/__tests__/useSquadExport.spec.ts packages/contracts/src/exports.contract.ts packages/contracts/src/index.ts pnpm-lock.yaml`
+Tracked feature diff: `git diff origin/main -- apps/api/src/auctions apps/api/package.json apps/api/tsconfig.json apps/web/src/components/auction/ExportButton.tsx apps/web/src/components/auction/SquadTab.tsx apps/web/src/components/auction/__tests__/ExportButton.spec.tsx apps/web/src/hooks/useSquadExport.ts apps/web/src/hooks/__tests__/useSquadExport.spec.ts apps/web/vitest.config.ts packages/contracts/src/exports.contract.ts packages/contracts/src/index.ts packages/contracts/package.json packages/contracts/tsconfig.json pnpm-lock.yaml`. Use `git status --short` to include the untracked `apps/web/vitest.setup.ts` in the review scope.
 
 </details>

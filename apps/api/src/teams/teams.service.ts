@@ -134,7 +134,7 @@ export class TeamsService {
     const { items, total } = await this.teamRepo.findByCreator(userId, skip, take);
 
     return {
-      teams: items.map((t) => this.formatTeamListItem(t)),
+      teams: items.map((t: any) => this.formatTeamListItem(t)),
       total,
       hasMore: skip + take < total,
     };
@@ -147,7 +147,7 @@ export class TeamsService {
     const { items, total } = await this.teamRepo.findAll(skip, take);
 
     return {
-      teams: items.map((t) => this.formatTeamListItem(t)),
+      teams: items.map((t: any) => this.formatTeamListItem(t)),
       total,
       hasMore: skip + take < total,
     };

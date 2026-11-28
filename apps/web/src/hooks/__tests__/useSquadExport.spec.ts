@@ -201,7 +201,7 @@ describe('useSquadExport', () => {
     expect(createElementSpy).toHaveBeenCalledWith('a');
     expect(mockLink.download).toContain('squad_export_auction1');
     expect(mockLink.download).toContain('My_Auction');
-    expect(mockLink.download).toEndWith('.csv');
+    expect(mockLink.download).toMatch(/\.csv$/);
     expect(mockLink.click).toHaveBeenCalled();
 
     createElementSpy.mockRestore();
@@ -280,7 +280,7 @@ describe('useSquadExport', () => {
     await act(async () => {
       await result.current.export(ExportFormat.CSV);
     });
-    expect(mockLink.download).toEndWith('.csv');
+    expect(mockLink.download).toMatch(/\.csv$/);
 
     // Reset mock
     mockLink.download = '';
@@ -289,7 +289,7 @@ describe('useSquadExport', () => {
     await act(async () => {
       await result.current.export(ExportFormat.XLSX);
     });
-    expect(mockLink.download).toEndWith('.xlsx');
+    expect(mockLink.download).toMatch(/\.xlsx$/);
 
     createElementSpy.mockRestore();
   });

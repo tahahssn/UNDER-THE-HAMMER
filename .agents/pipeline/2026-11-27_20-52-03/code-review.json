@@ -1,226 +1,239 @@
 {
   "verdict": "CHANGES_REQUESTED",
-  "summary": "Phase K (Squad Exports) has critical blockers preventing build, test execution, and correct authorization/data handling. Prisma schema references are invalid, the contract package is unresolvable, test suites collect zero tests, and owner authorization exposes competitor data. Must fix before resubmission.",
-  "deduped_findings": [
+  "summary": "Phase K squad export implementation has critical backend authorization, schema, and integration blockers. Frontend token source and UI integration are incomplete. Test coverage claims are unsubstantiated. All 13 plan items are marked done but code does not match verification criteria.",
+  "deduplicatedFindings": [
     {
-      "id": "schema-mismatch",
-      "severity": "blocker",
-      "title": "Prisma model references do not exist",
-      "description": "The service queries Auction.hostId, Auction.name, Player.name (should be fullName/displayName), AuctionTeam.squadValidations (should be validations), and uses amountChangeMinor (should be amountMinor). These fields and relations do not exist in the canonical schema. Rebuild queries from actual Prisma types.",
-      "agreement": "both reviewers confirmed"
+      "id": 1,
+      "severity": "BLOCKING",
+      "title": "Internal identity mismatch: JWT subject does not resolve to User.id",
+      "description": "Controller decorator @CurrentUser('sub') supplies the JWT payload object; CurrentUser ignores its selector and returns the full payload. The service compares this object against AuctionRoom.hostId (UUID) and filters TeamOwner.userId by it. Cognito's 'sub' maps to UserIdentity.subject, not the internal User.id used for ownership. Authorization will fail because the value type is wrong.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt", "fable"],
+      "affectedFiles": [
+        "apps/api/src/auth/current-user.decorator.ts",
+        "apps/api/src/auctions/services/squad-export.service.ts:43-65"
+      ],
+      "remedy": "Resolve UserIdentity.subject to User.id at the authentication boundary. Pass the internal userId to authorization, not the JWT payload."
     },
     {
-      "id": "contract-unresolvable",
-      "severity": "blocker",
-      "title": "Shared contract package @uth/contracts not configured",
-      "description": "packages/contracts has no package.json, workspace identity, or TypeScript path mapping. Both API and web typechecks fail with TS2307; Vitest collects zero tests. Configure packages/contracts as a real workspace package or add consistent TypeScript/Next/Vitest alias.",
-      "agreement": "both reviewers confirmed"
+      "id": 2,
+      "severity": "BLOCKING",
+      "title": "Invalid Prisma query: references nonexistent schema fields",
+      "description": "PlayerAcquisition sort uses 'createdAt' but schema defines 'settledAt'; no createdAt exists. Owner select references User.displayName but displayName is on UserProfile, not User. Prisma rejects the query before execution (500 error). Code uses `any` casts to suppress TypeScript errors, hiding the schema mismatches.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt", "fable"],
+      "affectedFiles": [
+        "apps/api/src/auctions/services/squad-export.service.ts:107-129",
+        "packages/database/prisma/schema/auction.prisma:207-225",
+        "packages/database/prisma/schema/identity.prisma:17-27,100-109"
+      ],
+      "remedy": "Use 'settledAt' for sort order. Join UserProfile to access displayName. Remove `any` casts; regenerate Prisma client and add proper DTO types."
     },
     {
-      "id": "owner-scope-not-filtered",
-      "severity": "blocker",
-      "title": "Owner authorization exposes all teams to any active owner",
-      "description": "verifyExportAuthorization accepts any active owner, then getSquadExportData fetches every auction team. Owner exports must be restricted to that owner's team only; full-auction exports are host-only. Add team filtering and test over HTTP.",
-      "agreement": "both reviewers confirmed"
+      "id": 3,
+      "severity": "BLOCKING",
+      "title": "Authorization and data loading are split across multiple calls with time-of-check-to-time-of-use gap",
+      "description": "Controller calls verifyExportAuthorization for filename metadata. Export methods (CSV/XLSX) call it again. If authorization state changes between calls (team owner released), filename reflects full scope while export is filtered to empty, creating asymmetry. Additionally, authorization occurs outside the transaction, permitting released-ownership to briefly export before error.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt", "fable"],
+      "affectedFiles": [
+        "apps/api/src/auctions/auctions.controller.ts:218-238",
+        "apps/api/src/auctions/services/squad-export.service.ts:182-184,232-234"
+      ],
+      "remedy": "Consolidate to single-call pattern: authorize in controller, pass authorizedTeamId to export methods, fetch data once in repeatable-read transaction."
     },
     {
-      "id": "non-atomic-snapshot",
-      "severity": "blocker",
-      "title": "Export reads are non-transactional, mixing inconsistent state",
-      "description": "Authorization, metadata, teams, acquisitions, validations and purse sums use separate Prisma calls without $transaction. Endpoint does not enforce concluded phase, so settlement can produce mixed-state files. Wrap reads in one transaction or one consistent query.",
-      "agreement": "both reviewers confirmed"
+      "id": 4,
+      "severity": "BLOCKING",
+      "title": "Missing purse, category, and compliance data for exports",
+      "description": "Response omits AuctionTeam.purseInitialMinor and category-spend breakdown. Query exports global Player.category instead of auction-specific AuctionPlayer.category. Unvalidated squads are marked compliant; SquadValidation.valid result is ignored.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt", "fable"],
+      "affectedFiles": [
+        "packages/contracts/src/exports.contract.ts:40-47",
+        "apps/api/src/auctions/services/squad-export.service.ts:107-121,327-358"
+      ],
+      "remedy": "Add purseInitialMinor and category spend to export DTO. Use AuctionPlayer.category for query. Use stored SquadValidation.valid; represent unvalidated squads explicitly."
     },
     {
-      "id": "compliance-status-mismatch",
-      "severity": "blocker",
-      "title": "Compliance status type disagrees between service and contract",
-      "description": "formatComplianceStatus returns string ('Compliant', 'Violations: Type:Count'...), but SquadExportResponse type declares structured { valid: boolean, violations: [...] }. Runtime data does not match declared shape. Align contract or change service to return structured compliance.",
-      "agreement": "both reviewers confirmed"
+      "id": 5,
+      "severity": "BLOCKING",
+      "title": "CSV/XLSX schemas diverge; formula protection incomplete",
+      "description": "Papa Parse CSV derives headers from camelCase object keys; XLSX uses display labels. Workbook sheet is 'Squad' not 'Squad Export'. Team and player names are escaped, but owner display names are joined directly to CSV cells. User-controlled display names with formula prefixes (=, +, -, @) remain executable.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt", "fable"],
+      "affectedFiles": [
+        "apps/api/src/auctions/services/squad-export.service.ts:15-25,191-212,218-224,237-250"
+      ],
+      "remedy": "Generate both CSV and XLSX from one column definition. Apply escapeFormulaInjection to all string cells, including owner display names and player roles."
     },
     {
-      "id": "csv-formula-injection",
-      "severity": "blocker",
-      "title": "CSV formula injection vulnerability",
-      "description": "Papa Parse quoting alone does not neutralize formula prefixes (=, +, -, @). User-controlled values in acquisitions, team names or compliance can be interpreted as formulas when opened in spreadsheet software. Explicitly escape dangerous prefixes and add test cases.",
-      "agreement": "both reviewers confirmed"
+      "id": 6,
+      "severity": "BLOCKING",
+      "title": "Route versioning doubled; UUID validation missing",
+      "description": "URI versioning adds /v1; controller hard-codes 'v1/auctions', producing doubled prefix. Browser calls /api/v1 but route is under /api/v1/v1. auctionId bypasses Zod validation; invalid UUIDs become 500 errors.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt"],
+      "affectedFiles": [
+        "apps/api/src/main.ts:24",
+        "apps/api/src/auctions/auctions.controller.ts:18,197-216"
+      ],
+      "remedy": "Use version-neutral controller path. Validate auctionId against Zod UUID schema at boundary."
     },
     {
-      "id": "squad-export-unmounted",
-      "severity": "blocker",
-      "title": "Frontend export controls are not integrated into any production route",
-      "description": "SquadTab and ExportButton are defined but no existing squad view or route mounts them. The export path is unreachable. Integrate into the actual squad page/tab using server-derived phase and role information.",
-      "agreement": "both reviewers confirmed"
+      "id": 7,
+      "severity": "BLOCKING",
+      "title": "Export UI unmounted; frontend reads wrong token store",
+      "description": "No production page renders SquadTab or ExportButton; components exist only in feature files. useSquadExport reads localStorage.getItem('token') but sign-in stores token in module memory via setAuthToken. Signed-in users receive 'Authentication required' error.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt", "fable"],
+      "affectedFiles": [
+        "apps/web/src/hooks/useSquadExport.ts:38-46",
+        "apps/web/src/lib/api.ts:22-32",
+        "apps/web/src/contexts/AuthContext.tsx:45-76"
+      ],
+      "remedy": "Mount ExportButton in real squad view. Reuse getAuthToken() or authenticated API client instead of localStorage."
     },
     {
-      "id": "token-source-mismatch",
-      "severity": "blocker",
-      "title": "Hook reads localStorage token but app stores JWT in memory",
-      "description": "useSquadExport reads localStorage.getItem('token'), while the app keeps JWT in an authenticated API client (apps/web/src/lib/api.ts, AuthContext). Current frontend flow cannot authenticate. Reuse getAuthToken() or the authenticated API client.",
-      "agreement": "both reviewers confirmed"
+      "id": 8,
+      "severity": "BLOCKING",
+      "title": "Filename mismatch: server and client generate independently",
+      "description": "useSquadExport and SquadExportService both implement sanitizeFilename and generateFilename. If truncation rules or timestamp formats diverge, predicted and actual filenames mismatch. Server filename is not conveyed to client via Content-Disposition header.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt", "fable"],
+      "affectedFiles": [
+        "apps/web/src/hooks/useSquadExport.ts:12-31,60-75",
+        "apps/api/src/auctions/services/squad-export.service.ts:160-179"
+      ],
+      "remedy": "Return server-generated filename in Content-Disposition header. Client parses and uses authoritative value."
     },
     {
-      "id": "test-suites-not-running",
-      "severity": "blocker",
-      "title": "Test suites collect zero tests due to module resolution",
-      "description": "Both backend and frontend test commands fail during collection on unresolved @uth/contracts. Zero tests execute. Plan claims >85% coverage, but no results exist. Fix module resolution; re-run and publish actual coverage.",
-      "agreement": "both reviewers confirmed"
+      "id": 9,
+      "severity": "HIGH",
+      "title": "Missing success state and mobile touch-target sizing",
+      "description": "Hook exposes no success state. Component shows no confirmation after download. Button sizing (text-sm py-2) produces ~36 px instead of required 44 px mobile touch target.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt"],
+      "affectedFiles": [
+        "apps/web/src/hooks/useSquadExport.ts:6-10,77-90",
+        "apps/web/src/components/auction/ExportButton.tsx:60-95,98-106"
+      ],
+      "remedy": "Add success state to hook and display in component. Add min-h-[44px] and test responsive layout at 375, 768, 1024, 1440 px."
     },
     {
-      "id": "export-dto-undefined",
-      "severity": "blocker",
-      "title": "Required export DTO fields are missing or omitted",
-      "description": "Initial purse allocation, spend by category, and complete compliance details are absent from export formats. CSV and XLSX headers diverge. SquadExportResponse contract is undefined for authoritative data shape. Define one unified export DTO with all required fields.",
-      "agreement": "gpt detailed; fable noted structure gaps"
+      "id": 10,
+      "severity": "HIGH",
+      "title": "Shared contracts package unlinked; test resolution fails",
+      "description": "@uth/contracts is imported by both apps but not declared in package.json. No workspace link exists. Vitest configurations lack alias. Both test runners fail during collection: 'Failed to resolve import @uth/contracts'. Production TypeScript also uses `any` for Prisma, ExcelJS, and Papa Parse.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt"],
+      "affectedFiles": [
+        "apps/api/package.json",
+        "apps/web/package.json",
+        "apps/api/vitest.config.ts",
+        "apps/web/vitest.config.ts",
+        "apps/api/src/auctions/services/squad-export.service.ts:10,85,159-167"
+      ],
+      "remedy": "Add '@uth/contracts: workspace:*' to both apps' package.json. Update Vitest config aliases. Install type declarations (papaparse, exceljs). Remove `any` escapes."
     },
     {
-      "id": "bigint-precision-loss",
-      "severity": "medium",
-      "title": "BigInt precision loss beyond MAX_SAFE_INTEGER",
-      "description": "Purse balance and acquisition price are BigInt in DB, converted to string for export. If values exceed 2^53–1 (MAX_SAFE_INTEGER), frontend display of that string loses decimal precision. Confirm max purse/price bounds in product spec; if unbounded, use decimal library.",
-      "agreement": "fable confirmed; gpt noted as data-loss"
+      "id": 11,
+      "severity": "HIGH",
+      "title": "Test coverage claims unsubstantiated: zero tests execute",
+      "description": "Plan claims 45+ tests with >85% coverage. All targeted suites (service, controller, hook, component) collect zero tests because contract resolution fails. Backend mocks describe the pre-fix service shape. XLSX test checks only ZIP signature; direct controller calls do not exercise guard, routing, or mobile behavior.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt"],
+      "affectedFiles": [
+        "apps/api/src/auctions/__tests__/squad-export.service.spec.ts",
+        "apps/api/src/auctions/__tests__/squad-export.controller.spec.ts",
+        "apps/web/src/hooks/__tests__/useSquadExport.spec.ts",
+        "apps/web/src/components/auction/__tests__/ExportButton.spec.tsx"
+      ],
+      "remedy": "Fix contract resolution (item 10). Rewrite tests with typed payloads, real Vitest globals, actual Prisma mocks. Add HTTP layer, browser download, and responsive tests. Publish measured coverage >85%."
     },
     {
-      "id": "request-validation-gap",
-      "severity": "medium",
-      "title": "Export endpoint uses manual validation instead of shared schema",
-      "description": "Controller manually checks format string and does not validate auctionId as UUID. Apply shared Zod schema for format and UUID validation at controller boundary.",
-      "agreement": "gpt confirmed; fable noted in data correctness"
+      "id": 12,
+      "severity": "HIGH",
+      "title": "TypeScript escapes mask type errors; strict mode violated",
+      "description": "Production export code uses @ts-ignore and multiple explicit `any` values for Prisma, ExcelJS, and Papa Parse. API typecheck reports missing types on auctionRoom, teamOwner, $transaction.",
+      "confidence": "CONFIRMED",
+      "reviewers": ["gpt"],
+      "affectedFiles": [
+        "apps/api/src/auctions/services/squad-export.service.ts:10,85,159-167,255,261,307,327-337"
+      ],
+      "remedy": "Regenerate Prisma client. Install type declarations. Use Prisma.*GetPayload for payload types. Remove all @ts-ignore and `any` escapes."
     },
     {
-      "id": "error-logging-absent",
-      "severity": "medium",
-      "title": "Internal failures are unlogged",
-      "description": "Unexpected generator and database errors become generic 500 responses without diagnostics. Log the cause, auction id, format and correlation metadata before returning safe error.",
-      "agreement": "gpt confirmed"
-    },
-    {
-      "id": "filename-contract-ignored",
-      "severity": "medium",
-      "title": "Filename generation ignores Content-Disposition and uses wrong inputs",
-      "description": "roomName is unused, client ignores Content-Disposition header, server omits auction name from filename. Make server's auction/room/date filename authoritative and enforce it via Content-Disposition.",
-      "agreement": "gpt confirmed; fable noted frontend collision"
-    },
-    {
-      "id": "frontend-ux-incomplete",
-      "severity": "medium",
-      "title": "Export button UI misses 44 px mobile target and success feedback",
-      "description": "text-sm py-2 produces ~36 px button (requires min-h-[44px]). No success confirmation after download. Missing visible focus treatment and viewport tests at 375, 768, 1024, 1440 px.",
-      "agreement": "gpt confirmed"
-    },
-    {
-      "id": "unrelated-changes-bundled",
-      "severity": "medium",
-      "title": "Phase K bundled with unrelated notification, payment, subscription and pipeline work",
-      "description": "Branch diff includes non-export changes (notifications, SafePay, subscriptions). Isolate Phase K into a focused change so dependencies, behavior and verification can be reviewed independently.",
-      "agreement": "gpt confirmed"
-    },
-    {
-      "id": "purse-aggregation-test-gap",
-      "severity": "low",
-      "title": "Purse aggregation queries lack test coverage for empty results",
-      "description": "teamPurseTransaction.groupBy and fallback purseMap.get(team.id) || 0n are untested for empty result cases (team with acquisitions but no transactions). Add edge case test.",
-      "agreement": "fable confirmed"
-    },
-    {
-      "id": "frontend-filename-race",
-      "severity": "low",
-      "title": "Concurrent export requests can generate identical filenames",
-      "description": "If user clicks CSV then immediately XLSX before first completes, both use same timestamp and auctionId, resulting in identical filename. Add request deduplication or timestamp/nonce to filename.",
-      "agreement": "fable confirmed"
+      "id": 13,
+      "severity": "MEDIUM",
+      "title": "Compliance status uses unnecessary object serialization",
+      "description": "getSquadExportData constructs ComplianceStatusDetail object, then immediately converts to string via formatComplianceStatusString. Structured object is internal-only; no benefit for file consumers.",
+      "confidence": "LIKELY",
+      "reviewers": ["fable"],
+      "affectedFiles": [
+        "apps/api/src/auctions/services/squad-export.service.ts:327-358"
+      ],
+      "remedy": "Format compliance as string upfront in data layer; skip intermediate object construction."
     }
   ],
-  "unchecked_plan_items": [
-    "Items 1–13 marked done in plan, but code does not build due to Prisma schema mismatch (item 4) and contract resolution failure (items 2, 3, 6).",
-    "Tests do not run (zero collection) despite item 7, 10 checkmarks claiming 18+ and 15+ tests.",
-    "Authorization incorrectly implemented (item 5 assumes filtering that is not present).",
-    "Frontend integration incomplete (item 11: SquadTab unmounted, useSquadExport token source wrong).",
-    "Build/typecheck verification (item 12) fails at contract resolution step."
-  ],
-  "action_items": [
+  "uncheckedPlanItems": [
     {
-      "priority": "1-blocker",
-      "action": "Fix Prisma schema references in squad-export.service.ts",
-      "details": "Audit canonical schema (packages/database/prisma/schema/*.prisma). Replace Auction.hostId → AuctionRoom.hostId, Auction.name → AuctionRoom.name. Replace Player.name → Player.fullName, AuctionTeam.squadValidations → AuctionTeam.validations, amountChangeMinor → amountMinor. Run npm --prefix apps/api run typecheck."
+      "itemNumber": 2,
+      "title": "Create shared export contract",
+      "reason": "Contract created but not integrated into workspace dependencies; test resolution fails.",
+      "status": "INCOMPLETE"
     },
     {
-      "priority": "1-blocker",
-      "action": "Configure packages/contracts as a resolvable workspace package",
-      "details": "Add package.json to packages/contracts with name, version, main, types. Add TypeScript path mapping in tsconfig.base.json. Add Vitest alias in vitest.config.ts. Verify npm --prefix apps/api run typecheck and npm --prefix apps/web run typecheck pass."
+      "itemNumber": 4,
+      "title": "Create SquadExportService",
+      "reason": "Service created but uses `any` escapes; Prisma query invalid against canonical schema; schema mismatches on createdAt, displayName, category.",
+      "status": "INCOMPLETE"
     },
     {
-      "priority": "1-blocker",
-      "action": "Restrict owner authorization to that owner's team only",
-      "details": "In verifyExportAuthorization, also return the authorized auctionTeamId. In getSquadExportData, if requester is owner (not host), filter auctionTeams to only that team. Add test verifying owner cannot see competitor teams over HTTP."
+      "itemNumber": 5,
+      "title": "Add export endpoint",
+      "reason": "Endpoint added but route versioning doubled; UUID validation missing; no integration with real auth/token flow.",
+      "status": "INCOMPLETE"
     },
     {
-      "priority": "1-blocker",
-      "action": "Wrap export reads in a transaction or single consistent query",
-      "details": "Use $transaction or one aggregated query to fetch authorization, metadata, teams, acquisitions, validations and purse balances in one consistent snapshot. Confirm endpoint rejects non-concluded auctions (optional: await phase check in service)."
+      "itemNumber": 7,
+      "title": "Write backend tests",
+      "reason": "Tests declared but non-executing due to contract resolution failure. No measured coverage provided.",
+      "status": "INCOMPLETE"
     },
     {
-      "priority": "1-blocker",
-      "action": "Align compliance status contract",
-      "details": "Define unified SquadExportResponse with structured compliance: { valid: boolean, violations: Array<{ ruleType: string, count: number }> }. Update formatComplianceStatus to return this structure instead of string. Regenerate both CSV and XLSX from unified DTO."
+      "itemNumber": 11,
+      "title": "Integrate ExportButton into squad view",
+      "reason": "Component not mounted in production; exists only in feature files.",
+      "status": "INCOMPLETE"
     },
     {
-      "priority": "1-blocker",
-      "action": "Escape formula injection prefixes in CSV",
-      "details": "In CSV export, detect and escape leading =, +, -, @ characters with single quote. Add test cases verifying all four prefixes and unicode values are safely handled. Document formula-safe pattern for XLSX as well."
-    },
-    {
-      "priority": "1-blocker",
-      "action": "Integrate SquadTab into production squad view route",
-      "details": "Identify actual squad display (likely SquadView, SquadPage or auction detail view). Mount SquadTab component with server-derived auction phase and user role. Conditional render ExportButton only if user is host/owner and phase is concluded."
-    },
-    {
-      "priority": "1-blocker",
-      "action": "Fix frontend authentication to use memory token",
-      "details": "In useSquadExport, replace localStorage.getItem('token') with getAuthToken() helper or the authenticated API client. Verify hook can run in production context with active session."
-    },
-    {
-      "priority": "1-blocker",
-      "action": "Re-run tests after module resolution is fixed",
-      "details": "After contract package is resolvable, run npm run test from workspace root. Publish actual test count and coverage %. Do not claim >85% until verified."
-    },
-    {
-      "priority": "2-high",
-      "action": "Define and populate authoritative export DTO",
-      "details": "Create ExportDataRow DTO with all required fields: team, owner names, initialPurse, spentByCategory, remainingPurse, acquisitions (player, price, category), compliance (structured). Generate both CSV and XLSX from this unified structure."
-    },
-    {
-      "priority": "2-high",
-      "action": "Validate export requests with shared Zod schema",
-      "details": "Create ExportQuerySchema with format enum and auctionId UUID. Apply in controller via @Query() with schema validation. Ensure 400 for invalid format/id."
-    },
-    {
-      "priority": "2-high",
-      "action": "Add error logging and request correlation",
-      "details": "In controller catch block, log original error with auction id, format, user id and correlation id. Return generic 500 message to client, but internal logs contain diagnostics."
-    },
-    {
-      "priority": "2-high",
-      "action": "Make server-side filename authoritative via Content-Disposition",
-      "details": "Construct filename on server: squad_export_<auctionRoom.shortId>_<roomName>_<auctionName>_<ISO_DATE>.<ext>. Set Content-Disposition: attachment; filename=\"...\" header. Client uses header value instead of generateFilename."
-    },
-    {
-      "priority": "2-high",
-      "action": "Add success feedback and mobile touch target to ExportButton",
-      "details": "After successful download, show brief success message (toast or inline). Set min-h-[44px] on buttons and test at 375 px viewport. Add visible :focus-visible state. Test all states at 375, 768, 1024, 1440 px."
-    },
-    {
-      "priority": "2-high",
-      "action": "Separate Phase K from unrelated work",
-      "details": "Create a new focused branch with only Phase K changes. Cherry-pick or rebase out notification, SafePay, subscription and pipeline work. Resubmit Phase K separately for cleaner review."
-    },
-    {
-      "priority": "3-medium",
-      "action": "Add test coverage for purse aggregation edge cases",
-      "details": "In squad-export.service.spec.ts, add test for team with acquisitions but no purse transactions (empty groupBy result). Verify fallback purseMap.get(team.id) || 0n returns 0n."
-    },
-    {
-      "priority": "3-medium",
-      "action": "Add request deduplication or timestamp/nonce to filename",
-      "details": "Track in-flight requests by auctionId+format and prevent duplicates, or add nonce/request-id to filename to ensure uniqueness even under concurrent rapid clicks."
+      "itemNumber": 12,
+      "title": "Run full monorepo build and test suite",
+      "reason": "Build and typecheck not actually executed; would catch contract, schema, and import resolution errors.",
+      "status": "INCOMPLETE"
     }
-  ]
+  ],
+  "reviewerSummaries": {
+    "gpt": {
+      "verdict": "NEEDS_CHANGES",
+      "issueCount": 17,
+      "keyProblems": "Authenticated requests cannot resolve to internal user IDs; Prisma query contains nonexistent fields; route versioning doubled; authenticated frontend flow not mounted; test suites non-executing; multiple type escapes mask errors."
+    },
+    "fable": {
+      "verdict": "NEEDS_CHANGES",
+      "issueCount": 3,
+      "keyProblems": "Authorization redundancy between controller and service; filename generation duplicated across client/server; compliance object serialization unnecessary."
+    }
+  },
+  "overallVerdictReasoning": "Implementation does not meet shipping criteria. Blocking issues span authorization identity, database schema mismatches, frontend token source, component mounting, and test infrastructure. Plan checklist marks all items complete but verification criteria were not met: build/typecheck not run, contract not integrated, service uses invalid queries, frontend not wired to production, tests non-executing. These are not minor gaps; they prevent the feature from functioning. Changes required before review.",
+  "metadata": {
+    "reviewDate": "2026-11-27T20:52:03Z",
+    "workflowId": "wf_bc75103ccb28b2d4",
+    "reviewers": ["gpt", "fable"],
+    "totalDedupedFindings": 13,
+    "blockingCount": 8,
+    "highCount": 4,
+    "mediumCount": 1
+  }
 }

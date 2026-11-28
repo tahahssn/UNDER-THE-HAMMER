@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import type { RoomSettingsConfigDto } from '../../contracts/src/rooms.contract';
+import type { RoomSettingsConfigDto } from '@uth/contracts';
 
 /**
  * Validates and manages room configuration.

@@ -1,18 +1,7 @@
-export interface FileAssetDto {
-  id: string;
-  kind: string;
-  status: string;
-  objectKey: string;
-  bucket: string;
-  contentType?: string;
-  width?: number;
-  height?: number;
-  sizeBytes?: number;
-  uploadedBy?: { displayName: string };
-  rightsConfirmed: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
+// FileAssetDto is imported from files.contract
+import type { FileAssetDto } from "./files.contract";
+
+export type { FileAssetDto };
 
 export interface UserSummary {
   id: string;

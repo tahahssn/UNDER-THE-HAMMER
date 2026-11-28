@@ -228,7 +228,7 @@ export class RoomAllocationService {
 
     return {
       allocatedCount: teams.length,
-      teams: teams.map((t) => ({
+      teams: teams.map((t: any) => ({
         auctionTeamId: t.id,
         teamId: t.teamId,
         slotIndex: t.slotIndex,

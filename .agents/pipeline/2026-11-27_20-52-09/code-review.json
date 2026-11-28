@@ -1,424 +1,313 @@
 {
-  "metadata": {
-    "workflow_id": "wf_ed9b0b1515a7ab23",
-    "phase": "Phase N - Notifications System",
-    "timestamp": "2026-11-27T20:52:09Z",
-    "reviewers": ["Fable", "GPT"],
-    "verdict": "CHANGES_REQUESTED",
-    "deduplication_method": "merged_overlapping_findings_with_confidence_levels"
-  },
-  "summary": "Phase N introduces a multi-channel notification orchestration layer with SendGrid email, Twilio SMS, and in-app delivery. Backend services resolve per-category preferences, persist delivery tracking, and dispatch asynchronously to prevent blocking upstream callers. Frontend provides notification bell, dropdown, history page, and preference toggles. BOTH REVIEWERS confirm blocking security, schema, compilation, and integration issues that must be resolved before merge.",
-  "verdict_reasoning": "Verdict is CHANGES_REQUESTED because: (1) CRITICAL: Controllers are unauthenticated — endpoints hardcode user identity and lack JwtGuard, allowing public access to all notification read/write/delete and preference operations. (2) CRITICAL: Code does not compile — TypeScript errors in imports, enums, DTOs, and missing dependencies (date-fns); schema drift between migration SQL and Prisma client. (3) CRITICAL: Integration incomplete — domain events are declared but never emitted or listened; no trigger path exists from auctions/subscriptions to notifications. (4) CRITICAL: Delivery not durable — persistence is deferred with setImmediate, writes are non-atomic, no retry queue or worker; failed sends are permanent. (5) BLOCKING PLAN ITEMS UNCHECKED: Items 1-4 (database migration schema coherence), 7-15 (services, controllers, verification), 16-24 (integration, testing, configuration).",
-  "blocking_findings": [
+  "reviewDate": "2026-11-27",
+  "reviewers": ["gpt", "fable"],
+  "verdict": "CHANGES_REQUESTED",
+  "summary": "Notifications system has critical blockers preventing approval. Both reviewers confirm missing domain-event integration, identity resolution failures in controllers, lack of durable delivery/retry, authentication gaps, and incomplete test coverage. Plan items 1-15 are foundational; 16+ are blocked waiting for event emission confirmation from AuctionsModule.",
+  "consolidatedFindings": [
     {
-      "id": "AUTH_001",
-      "severity": "CRITICAL",
-      "title": "Controllers are unauthenticated — endpoints publicly accessible",
-      "description": "Both NotificationsController and NotificationPreferencesController hardcode userId as placeholder string 'user-id-from-jwt' without applying @UseGuards(JwtGuard) or @CurrentUser() decorator. All endpoints (GET notifications, POST mark-read, DELETE, GET/POST preferences) are publicly accessible. Any caller can read, modify, or delete any user's notifications and preferences.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/notifications.controller.ts",
-        "apps/api/src/notifications/notifications-preferences.controller.ts"
-      ],
-      "action_required": "Apply @UseGuards(JwtGuard), inject @CurrentUser() decorator, extract userId from JWT sub claim. Verify user owns notification before read/delete. This is blocking for release."
+      "id": "1-domain-triggers-absent",
+      "severity": "BLOCKER",
+      "category": "Integration",
+      "title": "Domain event triggers are absent",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "No requested auction, break, conclusion, or subscription event invokes NotificationService. Neither reviewer found @OnEvent listeners, EventEmitter2.emit calls, or direct invocations from accepted bids, settlement, break transitions, or subscription processing. EventEmitterModule.forRoot() registers a bus with no publishers or subscribers.",
+      "impact": "Notifications cannot be produced in normal operation; the entire dispatch pathway is dead code.",
+      "remediation": "Coordinate with AuctionsModule and SubscriptionsModule to emit post-commit events (bid.accepted, break.started, break.ended, auction.ended, subscription.expiring). NotificationService subscribes via @OnEvent handlers and resolves recipients from authoritative state. Add scheduled subscription-expiry producer."
     },
     {
-      "id": "COMPILE_001",
-      "severity": "CRITICAL",
-      "title": "Phase N does not compile — TypeScript errors and missing dependencies",
-      "description": "Targeted API typecheck fails: PrismaService import from @uth/database is incorrect (exports Client, not injectable service), ZodValidationPipe does not exist in @nestjs/common, ioredis is undeclared, Twilio namespace is not callable, DeliveryStatus enum mismatches string status values, DTO fields violate strict initialization. Frontend typecheck fails: date-fns is not in apps/web/package.json but imported in NotificationItem.tsx. Build cannot proceed.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/services/*.ts",
-        "apps/api/src/notifications/notifications-preferences.controller.ts",
-        "apps/web/src/components/notifications/NotificationItem.tsx",
-        "apps/api/package.json",
-        "apps/web/package.json"
-      ],
-      "action_required": "Fix all import paths, add missing dependencies (date-fns to web, declare ioredis in api), resolve enum/type conflicts, fix DTO initialization. Run npm run typecheck for apps/api and apps/web; ensure both pass before merge."
+      "id": "2-prisma-composition-drift",
+      "severity": "BLOCKER",
+      "category": "Database",
+      "title": "Prisma composition and migration drift",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "build-schema.mjs does not include the duplicate Phase N schema (notifications.prisma). The composed identity schema still has only IN_APP and EMAIL, no SMS or profile phone. The migration adds SMS, phoneNumber, and delivery timestamps, but the schema file lacks all three. Schema validation passes only because the new file is excluded from composition.",
+      "impact": "Generated Prisma client lacks the new SMS enum, phoneNumber field, and retry-timestamp contract. Services will reference undefined fields, causing runtime failures.",
+      "remediation": "Update existing identity/support domain models (stop duplicating), create a matching migration covering all three changes, regenerate the Prisma client, and validate the actual pre-migration schema path."
     },
     {
-      "id": "SCHEMA_001",
-      "severity": "CRITICAL",
-      "title": "Migration and Prisma schema drift — generated client misses new fields",
-      "description": "Migration 20261128_notifications_sms_phone_timestamps adds SMS enum value, UserProfile.phoneNumber, NotificationDelivery.createdAt/updatedAt/retry index to PostgreSQL. Modular Prisma schema sources still define only IN_APP and EMAIL enum values, omit phoneNumber, and omit delivery timestamps. Regenerating schema.prisma removes the new fields from client model even though migration adds them to database, creating schema-database mismatch.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "packages/database/prisma/migrations/20261128_notifications_sms_phone_timestamps/migration.sql",
-        "packages/database/prisma/schema.prisma",
-        "packages/database/prisma/schema/ (modular sources)"
-      ],
-      "action_required": "Update all modular Prisma schema source files to include SMS enum, phoneNumber field, and delivery timestamps. Regenerate schema.prisma and validate migration + generated client together. Verify: npm run db:validate && npm run build:schema && npm run typecheck."
+      "id": "3-authenticated-identity-invalid",
+      "severity": "BLOCKER",
+      "category": "Authentication",
+      "title": "Authenticated identity is still invalid in controllers",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "@CurrentUser('sub') returns the entire JWT payload, not a string. Cognito sub is not the internal User.id UUID. Controllers hardcode userId as 'user-id-from-jwt' placeholder; no @UseGuards(JwtGuard) is applied. All endpoints are publicly accessible.",
+      "impact": "Endpoints are unauthenticated and exposed. Even after wiring JWT, extracted identity will be wrong type for UUID-scoped queries (User lookups fail, cross-user access undetected).",
+      "remediation": "Apply @UseGuards(JwtGuard) to all controllers. Inject @CurrentUser(), extract sub from JWT, resolve User.id via UserIdentity.getCognitoIdByUserId(), pass internal UUID to all Prisma queries. Verify user owns notification before read/delete (403 FORBIDDEN if mismatch)."
     },
     {
-      "id": "INTEGRATION_001",
-      "severity": "CRITICAL",
-      "title": "Domain event triggers are absent — notifications never dispatched from auctions/subscriptions",
-      "description": "Design specifies domain events (bid.accepted, break.started, break.ended, auction.ended, subscription.expiring) should trigger NotificationService.dispatchNotification. Confirmed: event file declares interfaces only, NotificationService has no @OnEvent handlers, no @OnEvent listeners are registered in module, and AuctionsModule/SubscriptionsModule do not emit events. No production path invokes notification dispatch. Event integration is deferred to Phase N.2 but marked as Phase N in plan, leaving feature non-functional.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/services/notification.service.ts",
-        "apps/api/src/notifications/notifications.module.ts",
-        "apps/api/src/notifications/events/notification.events.ts",
-        "apps/api/src/auctions/services/bid-acceptance.service.ts",
-        "apps/api/src/subscriptions/subscriptions.service.ts"
-      ],
-      "action_required": "Either (A) add @OnEvent handlers to NotificationService in this phase and coordinate AuctionsModule/SubscriptionsModule to emit events, OR (B) clarify Phase N.2 scope and document event integration as deferred. For now, review plan item 16 (Verify Event Emission in AuctionsModule) and item 17 (Implement Event Listeners) are UNCHECKED and blocking."
-    },
-    {
-      "id": "DELIVERY_001",
-      "severity": "CRITICAL",
-      "title": "Delivery is neither durable nor retried — failed sends are permanent",
-      "description": "Persistence is deferred with setImmediate, allowing process exit before data is written. Notification and NotificationDelivery writes are separate, allowing partial state if one fails. No background worker consumes pending deliveries or retries failed sends. getPendingDeliveries and incrementAttempts methods exist but are unused. Failed email/SMS (non-rate-limited) is marked FAILED permanently; rate-limited SMS stays PENDING forever. NOTIFICATION_RETENTION_DAYS config is never consumed. Without a retry queue, transient provider failures become permanent data loss.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/services/notification.service.ts",
-        "apps/api/src/notifications/services/notification-delivery.service.ts"
-      ],
-      "action_required": "Implement durable outbox pattern: commit Notification + NotificationDelivery records transactionally with the domain operation. Add background retry job (cron or queue worker) that runs every 5 minutes, claims pending deliveries, re-attempts with exponential backoff, and marks retries as FAILED after N attempts. Alternatively, defer retry implementation to Phase N.3 and document as incomplete."
-    }
-  ],
-  "deduped_findings": [
-    {
-      "id": "FIND_001",
+      "id": "4-browser-route-auth-mismatch",
       "severity": "HIGH",
-      "title": "Client route and authentication contracts do not match API",
-      "description": "Frontend hooks call /api/v1/notifications with cookies and credentials: 'include', but Next.js app does not proxy or rewrite this path. API uses bearer tokens via shared Axios interceptor. Nest enables versioning with default version 1; controllers embed v1 in paths without VERSION_NEUTRAL, creating doubled version prefix. Routes do not align.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/web/src/hooks/useNotifications.ts",
-        "apps/web/src/hooks/useNotificationPreferences.ts",
-        "apps/api/src/notifications/notifications.controller.ts",
-        "apps/api/src/app.module.ts"
-      ],
-      "recommendation": "Declare one route version strategy (remove v1 from controller paths or disable Nest versioning). Ensure frontend uses shared authenticated client with bearer tokens, not cookies."
+      "category": "Integration",
+      "title": "Browser route and auth contracts do not match Nest API",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "Frontend hooks call relative /api/v1/notifications URLs with credentials: 'include' (cookies). JwtGuard expects bearer tokens; the shared Axios client adds Authorization: Bearer. Next has no matching API route or rewrite for /api/v1. Nest also enables URI versioning with default 1, while controllers embed v1 without VERSION_NEUTRAL.",
+      "impact": "Frontend requests fail with 404 or auth rejection. Requests that reach the API are rejected because bearer token is missing.",
+      "remediation": "Declare one route version (URI or header-based). Use documented proxy or shared authenticated API client. Ensure Next API routes are configured to forward to Nest, or use VERSION_NEUTRAL on manually versioned controllers to unify the versioning strategy."
     },
     {
-      "id": "FIND_002",
+      "id": "5-preference-semantics-inconsistent",
       "severity": "HIGH",
-      "title": "SMS rate limit is global per-user, not per-auction/category",
-      "description": "Once a user hits 1 SMS per 5 minutes (global limit), next notification marked PENDING regardless of category or auction. User bidding on two auctions in rapid succession gets SMS only for first bid; second is deferred silently. Rate limit key includes only userId, not auctionId or category.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/services/rate-limit.service.ts",
-        "apps/api/src/notifications/services/sms-adapter.service.ts"
-      ],
-      "recommendation": "Clarify product intent: is global per-user rate limit by design (spam prevention) or should it be per-category/auction? If by design, document trade-off. If not, refactor rate-limit key to include auctionId or category."
+      "category": "Business Logic",
+      "title": "Preference semantics are inconsistent and incomplete",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "Disabling in-app does not remove a notification from the feed; it still appears after disabling. Omitted update fields reset other channels (omitted values become inApp: true, email: false, sms: false). Writes can partially apply via three sequential upserts. Consent timestamps are manufactured without validated evidence. SUBSCRIPTION_EXPIRING skips consent validation entirely.",
+      "impact": "User preferences don't control visibility. Preference changes are silent or stale. Marketing opt-ins don't require explicit user action, violating GDPR/CASL.",
+      "remediation": "Preserve omitted values in updates (only change specified channels). Use atomic transaction for all three upsert operations. Make feed visibility and consent follow stored preference choice. Record consentedAt only from defined user action with disclosure (not auto-manufactured). Add backend consent validation for marketing categories."
     },
     {
-      "id": "FIND_003",
+      "id": "6-delivery-not-durable-or-retried",
+      "severity": "BLOCKER",
+      "category": "Reliability",
+      "title": "Delivery is neither durable nor retried",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "Persistence is deferred in-process via setImmediate. Pending rows have no consumer; getPendingDeliveries and incrementAttempts have no callers. Attempts stay zero. Transient provider failures are terminal; a rate-limited SMS never retries; SMS adapter marks PENDING, but no job ever processes PENDING records. Process exit loses the entire intent.",
+      "impact": "Failed email/SMS sends are permanent. Rate-limited SMS never recovers. High transient failure surface with zero retry mechanism.",
+      "remediation": "Use transactional outbox or durable queue with claimed jobs, backoff, and retryable vs terminal states. Implement background retry job consuming pending deliveries every 5 minutes with exponential backoff (max 3 attempts, then mark FAILED). Or defer retry to Phase N.3 and document as deferred."
+    },
+    {
+      "id": "7-idempotency-compares-wrong-key",
       "severity": "HIGH",
-      "title": "Unread notification count calculation is unoptimized — O(n) filter on every render",
-      "description": "useNotifications hook derives unread count by filtering notifications array on every render: `notifications.filter(n => !n.read).length`. With 100+ notifications in state, unnecessary re-renders cause performance degradation.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/web/src/hooks/useNotifications.ts",
-        "apps/web/src/components/notifications/NotificationBell.tsx"
-      ],
-      "recommendation": "Memoize unread count with useMemo, or compute unreadCount in backend response. Return authoritative unread count with notifications list."
+      "category": "Data Integrity",
+      "title": "Idempotency compares the wrong key",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "Idempotency check runs only when both auctionId and playerId exist; skips non-player events (break, subscription). Different players can suppress one another via shared auctionId. Compares only user, category, time, and data.auctionId (missing playerId in comparison). Top-level IDs are not merged into persisted data. No unique constraint enforces deduplication atomically.",
+      "impact": "SUBSCRIPTION_EXPIRING and other non-auction events can be duplicated. Rapid sequential bids from different players can suppress each other's notifications.",
+      "remediation": "Persist a stable source-event key (e.g., event source + timestamp + actor + subject). Insert under database uniqueness constraint (UNIQUE(userId, eventKey)). Verify constraint at database level, not application logic."
     },
     {
-      "id": "FIND_004",
-      "severity": "HIGH",
-      "title": "Frontend optimistic updates do not revert on error — stale state risk",
-      "description": "markAsRead and deleteNotification update local state immediately, but if backend call fails, UI state remains mutated. Marked-as-read notification stays read in UI but backend shows unread. Users refresh and see notifications re-appear, causing confusion.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/web/src/hooks/useNotifications.ts",
-        "apps/web/src/components/notifications/NotificationDropdown.tsx"
-      ],
-      "recommendation": "Add error boundary: revert state if backend response indicates failure. Consider pessimistic updates (wait for server confirmation before updating local state) for critical operations."
-    },
-    {
-      "id": "FIND_005",
-      "severity": "HIGH",
-      "title": "Idempotency only applies to auction events, not all categories",
-      "description": "checkIdempotency requires auctionId and playerId but queries only userId, category, time window, and data.auctionId (playerId is never compared in query). SUBSCRIPTION_EXPIRING and other non-auction events are never deduplicated. Duplicate subscription-expiry notifications will be sent if same event triggers twice within 60 seconds.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/services/notification.service.ts"
-      ],
-      "recommendation": "Persist stable event key under unique constraint and create atomically. Add fallback idempotency for non-auction events using category + data.subscriptionId or other stable identifier."
-    },
-    {
-      "id": "FIND_006",
-      "severity": "HIGH",
-      "title": "History and unread badge only represent the first slice — older notifications invisible",
-      "description": "useNotifications hardcodes page=1, discards pagination metadata, exposes no page or category parameter. History page filters only 20 local records; badge counts only 5 recent notifications. Older unread notifications are invisible in badge (count always ≤5). Pagination and filtering are non-functional.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/web/src/hooks/useNotifications.ts",
-        "apps/web/src/components/notifications/NotificationBell.tsx",
-        "apps/web/src/pages/account/notifications/index.tsx"
-      ],
-      "recommendation": "Return authoritative unread count from backend. Add server-driven pagination and category filter. Expose page, limit, and category parameters in hooks and pages."
-    },
-    {
-      "id": "FIND_007",
-      "severity": "HIGH",
-      "title": "Account screens bypass app shell and lack mobile/keyboard behavior",
-      "description": "Account screens live under src/pages/account, while shell and AuthProvider live in src/app/layout.tsx. Routes do not inherit App Router header, footer, provider, or stylesheet setup. Layout pages use fixed multi-column tables that break at 375px. Notification row clickables are divs without keyboard semantics. Toggles lack accessible names and aria-checked. Dropdown lacks focus management and menu semantics. Does not meet stated 375px and keyboard requirements.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/web/src/pages/account/notifications/index.tsx",
-        "apps/web/src/pages/account/settings/notifications.tsx",
-        "apps/web/src/components/notifications/NotificationDropdown.tsx"
-      ],
-      "recommendation": "Move account screens to src/app/account/.../page.tsx under App Router to inherit layout. Add responsive card layout for 375px mobile. Add semantic controls (button, aria-checked, role=menuitem) and focus management. Test with keyboard navigation and screen readers."
-    },
-    {
-      "id": "FIND_008",
-      "severity": "HIGH",
-      "title": "Provider configuration does not fail closed — missing credentials degrade silently",
-      "description": "If SENDGRID_API_KEY is unset, adapter logs warning and marks delivery FAILED; email is unavailable without system alert. Twilio sender number is optional and falls back to dummy +1234567890; valid credentials with no sender trigger real SMS from invalid origin. SendGrid HTML interpolates emailBody directly into <p>${emailBody}</p>; external data can inject markup.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/services/email-adapter.service.ts",
-        "apps/api/src/notifications/services/sms-adapter.service.ts"
-      ],
-      "recommendation": "Require complete provider configuration and fail on startup if credentials are missing. Escape dynamic content in email templates or use encoding template system. Add observability: alert on provider failures."
-    },
-    {
-      "id": "FIND_009",
+      "id": "8-history-and-unread-counts-incomplete",
       "severity": "MEDIUM",
-      "title": "Preference updates clobber omitted channels and do not enforce consent",
-      "description": "updatePreferencesForCategory receives optional channel fields; omitted values reset to defaults (inApp: true, email: false, sms: false). One-channel update resets other channels. Upserts are non-transactional; partial state exposed on failure. Enabling a channel manufactures consentedAt without validated user action.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/services/notification-preferences.service.ts"
-      ],
-      "recommendation": "Preserve omitted values in upserts. Apply preference changes transactionally. Record consentedAt only from validated user action (e.g., checkbox on signup). Add backend consent validation for marketing categories."
+      "category": "Frontend",
+      "title": "History and badge represent only the first slice",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "useNotifications hardcodes page=1, discards pagination metadata, exposes no page or category input. Account page filters first 20 rows locally (no pagination controls). Bell badge counts only 5 rows (9+ state unreachable). Unread count calculation is O(n) filter on every hook render (100+ notifications cause re-render overhead).",
+      "impact": "Older unread records disappear from view. Users cannot navigate notification history. Unread count is stale or missing. Frontend performance degrades with 100+ notifications.",
+      "remediation": "Return authoritative unread total from backend. Use server-driven pagination/category state. Memoize unreadCount or compute once in backend list response. Add pagination controls and category filter UI."
     },
     {
-      "id": "FIND_010",
+      "id": "9-account-ui-incomplete-accessibility",
       "severity": "MEDIUM",
+      "category": "Frontend",
+      "title": "Account screens miss shell, mobile, and keyboard behavior",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "Pages Router screens live under src/pages; they do not inherit App Router shell (header, footer, global styles, AuthProvider). No Pages Router _app.tsx. Clickable divs have no keyboard behavior (no role, no onKeyDown). Switches have no accessible names or checked state. Dropdown doesn't manage focus. Badge motion ignores prefers-reduced-motion. Fixed multi-column layouts have no 375px alternative.",
+      "impact": "Notifications pages are unstyled (no header/footer). Keyboard users cannot interact. Screen reader users get no semantics. Mobile (375px) has no responsive layout.",
+      "remediation": "Move routes into App Router shell (/app/account/notifications, /app/account/settings/notifications). Add semantic HTML (button, switch, aria-label, role). Implement focus management for dropdown. Respect prefers-reduced-motion. Add responsive 375px card layout. Test with keyboard and screen reader."
+    },
+    {
+      "id": "10-provider-output-leaks-pii-unsafe-html",
+      "severity": "HIGH",
+      "category": "Security",
+      "title": "Provider output leaks PII and does not fail closed",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "Success and invalid-recipient logs include full email addresses and phone numbers. Email HTML interpolates emailBody without escaping (markup can enter if notification text contains < > or &). Twilio defaults the sender to +1234567890 when TWILIO_PHONE_NUMBER is unset (silent degradation, no configuration failure).",
+      "impact": "PII exposed in logs. HTML injection possible if notification body contains user-supplied data. SMS sent from placeholder number (users confused about source). Missing credentials silently degrade instead of failing closed.",
+      "remediation": "Redact email/phone identifiers in logs (log count or hash instead). Escape HTML interpolations or send plain text only. Require TWILIO_PHONE_NUMBER to be configured and validated; fail startup if unset and SMS enabled. Validate SENDGRID_API_KEY at startup too."
+    },
+    {
+      "id": "11-test-claims-unsupported",
+      "severity": "BLOCKER",
+      "category": "Quality",
+      "title": "Test and build claims are unsupported",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "Backend test file contains only placeholder.spec.ts with expect(true).toBe(true). Frontend has no notification-specific tests. No behavioral test suite for channels, delivery retry, rate limiting, preferences, or workflows. API typecheck reports notification-specific Prisma delegate/field errors (schema drift). Web typecheck passes only after worktree added missing date-fns dependency.",
+      "impact": "No coverage of core logic. Build will fail on missing dependencies (date-fns locked to worktree). Confidence is zero.",
+      "remediation": "Add 85+ unit tests covering notification dispatch, idempotency, channel resolution, adapter behavior (mocked), rate limiting, preference CRUD. Add integration tests for database persistence and authorization. Add E2E tests for auction workflow. Fix Prisma schema drift so API typecheck passes without workarounds. Remove worktree dependency lock."
+    },
+    {
+      "id": "12-phase-bundled-unrelated-changes",
+      "severity": "MEDIUM",
+      "category": "Process",
+      "title": "Phase N is bundled with unrelated phases and artifacts",
+      "confirmed_by": ["gpt", "fable"],
+      "description": "Commits include payments, squad exports, contracts, subscription changes, generated artifacts, planning documents, temporary review output, and earlier Phases J, K, L work. The branch range cannot be reviewed in isolation. Test run is against a dirty worktree with locked dependencies.",
+      "impact": "Cannot bisect, review, deploy, or revert Phase N independently. Git history is polluted. CI runs against mixed work.",
+      "remediation": "Split or restack Phase N notifications work onto its own migration and dependency set. Clean up generated artifacts and planning files. Rebase to include only notification service, controllers, frontend, and tests. Push clean commit history."
+    },
+    {
+      "id": "13-sms-rate-limit-global-semantic",
+      "severity": "MEDIUM",
+      "category": "Business Logic",
+      "title": "SMS rate limit is global per-user, not per-auction; semantic unclear",
+      "confirmed_by": ["fable"],
+      "description": "Redis counter key sms:rate-limit:{userId} is incremented regardless of category or auction. Once user hits 1 SMS per 5-minute window, next SMS is deferred (marked PENDING) regardless of event type or room. If user is host of two auctions and wins a bid in each within 5 minutes, only one SMS generates.",
+      "impact": "User may miss time-sensitive bid notifications if they've already received an SMS in the same window for a different auction.",
+      "remediation": "Clarify intent with product: is this spam prevention (acceptable) or should limits be per-category or per-auction? If per-design, document the trade-off clearly for users. If not, refactor rate limit key to include category or auctionId."
+    },
+    {
+      "id": "14-preference-race-condition-dispatch",
+      "severity": "LOW",
+      "category": "Race Condition",
       "title": "Race condition: preference changes during dispatch",
-      "description": "If user disables email while BID_WON event is being processed, dispatch may still send email because resolveEnabledChannels is called once at start and not re-checked during adapter execution. Edge case; preference changes take 0–5 seconds to take effect. Acceptable for notification system but worth documenting.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/services/notification.service.ts"
-      ],
-      "recommendation": "Document this behavior in service comments. Consider re-checking preferences before each adapter dispatch if stricter consistency is required."
-    },
-    {
-      "id": "FIND_011",
-      "severity": "MEDIUM",
-      "title": "Migration lacks rollback for enum ADD VALUE",
-      "description": "PostgreSQL enum ADD VALUE is irreversible. If migration is rolled back in production, SMS enum value remains and causes inconsistencies. This is PostgreSQL limitation, not code defect, but requires acknowledgment.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "packages/database/prisma/migrations/20261128_notifications_sms_phone_timestamps/migration.sql"
-      ],
-      "recommendation": "Document this operational limitation. Plan for enum removal in future migration if SMS support is deprecated. Consider enum versioning strategy."
-    },
-    {
-      "id": "FIND_012",
-      "severity": "MEDIUM",
-      "title": "Test suite is placeholder only — no actual tests for notification system",
-      "description": "apps/api/src/notifications/__tests__ contains only placeholder.spec.ts with expect(true).toBe(true). No unit or integration tests for services, adapters, preferences, rate limiting, or delivery. No frontend notification tests. Plan claims 85+ tests and >85% coverage; none exist.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/__tests__/placeholder.spec.ts"
-      ],
-      "recommendation": "Add unit tests for NotificationService (dispatch, idempotency, channel resolution), adapters (email/SMS construction, provider calls, error handling), preferences (CRUD, defaults, validation), rate limit (increment, threshold), and delivery (record creation, status updates). Add E2E tests for notification flow. Measure coverage; defer if necessary to follow-up phase but document as incomplete."
-    },
-    {
-      "id": "FIND_013",
-      "severity": "MEDIUM",
-      "title": "Phase N bundled with unrelated implementation and workflow artifacts",
-      "description": "Commit/branch range includes Safepay payment code, squad export behavior and tests, subscription methods, planning files, temporary Phase J artifacts, and .agents workflow outputs. Phase N notifications cannot be validated, deployed, or reverted independently.",
-      "confirmed_by": ["Fable", "GPT"],
-      "recommendation": "Split production notification feature from unrelated phases, payment integration, planning, and workflow artifacts. Create focused Phase N commit containing only: schema migration, services, controllers, DTOs, frontend components, tests, and configuration. Remove .agents, payment, squad-export, and planning files from notification commit."
-    },
-    {
-      "id": "FIND_014",
-      "severity": "MEDIUM",
-      "title": "Redis rate limit has no fallback if unreachable",
-      "description": "If Redis is unreachable during rate-limit check, SMS adapter catches exception and fails silently. No fallback strategy (skip rate limit or fail safe). Operational behavior should be documented.",
-      "confirmed_by": ["Fable", "GPT"],
-      "affected_files": [
-        "apps/api/src/notifications/services/rate-limit.service.ts",
-        "apps/api/src/notifications/services/sms-adapter.service.ts"
-      ],
-      "recommendation": "Define fallback strategy: (A) skip rate limit and attempt send, (B) fail and mark PENDING for retry, or (C) hardcode deny to prevent cascade. Document chosen strategy in service comments and operations runbook."
+      "confirmed_by": ["fable"],
+      "description": "resolveEnabledChannels is called once at dispatch start and not re-checked during adapter execution. If user disables email while BID_WON event is being processed, dispatch may still send email (window: 0–5 seconds of adapter execution).",
+      "impact": "User preference change takes 0–5 seconds to take effect. Edge case but technically observable.",
+      "remediation": "Acceptable for notification system (eventual consistency is fine). Document or monitor if needed. Alternative: re-check preferences per adapter before sending, but adds latency."
     }
   ],
-  "unchecked_plan_items": [
+  "uncheckedPlanItems": [
     {
-      "item": "1",
+      "id": 1,
       "title": "Database Migrations: Add SMS to NotificationChannel Enum",
-      "status": "NOT_STARTED",
-      "blocker_category": "schema"
+      "checked": false
     },
     {
-      "item": "2",
+      "id": 2,
       "title": "Database Migrations: Add phoneNumber to UserProfile",
-      "status": "NOT_STARTED",
-      "blocker_category": "schema"
+      "checked": false
     },
     {
-      "item": "3",
+      "id": 3,
       "title": "Database Migrations: Add createdAt and updatedAt to NotificationDelivery",
-      "status": "NOT_STARTED",
-      "blocker_category": "schema"
+      "checked": false
     },
     {
-      "item": "4",
+      "id": 4,
       "title": "Apply Database Migrations",
-      "status": "NOT_STARTED",
-      "blocker_category": "schema"
+      "checked": false
     },
     {
-      "item": "5",
+      "id": 5,
       "title": "Create NotificationsModule Structure",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "6",
+      "id": 6,
       "title": "Create DTOs and Type Definitions",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "7",
+      "id": 7,
       "title": "Implement RateLimitService",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "8",
+      "id": 8,
       "title": "Implement NotificationDeliveryService",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "9",
+      "id": 9,
       "title": "Implement NotificationPreferencesService",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "10",
+      "id": 10,
       "title": "Implement In-App Adapter",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "11",
+      "id": 11,
       "title": "Implement Email Adapter (SendGrid)",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "12",
+      "id": 12,
       "title": "Implement SMS Adapter (Twilio)",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "13",
+      "id": 13,
       "title": "Implement NotificationService (Orchestrator)",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "14",
+      "id": 14,
       "title": "Implement NotificationsController and NotificationPreferencesController",
-      "status": "NOT_STARTED",
-      "blocker_category": "authentication"
+      "checked": false
     },
     {
-      "item": "15",
+      "id": 15,
       "title": "Integrate NotificationsModule into AppModule",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "16",
+      "id": 16,
       "title": "VERIFICATION CHECKPOINT: Confirm Event Emission in AuctionsModule",
-      "status": "NOT_STARTED",
-      "blocker_category": "integration"
+      "checked": false,
+      "blocker": true,
+      "note": "BLOCKS items 17 and later. Must verify AuctionsModule emits required events."
     },
     {
-      "item": "17",
+      "id": 17,
       "title": "Implement Event Listeners in NotificationService",
-      "status": "NOT_STARTED",
-      "blocker_category": "integration"
+      "checked": false,
+      "dependsOn": 16
     },
     {
-      "item": "18",
+      "id": 18,
       "title": "Create Frontend NotificationBell Component",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "19",
+      "id": 19,
       "title": "Create Frontend Notifications History Page",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "20",
+      "id": 20,
       "title": "Create Frontend Notification Preferences Page",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "21",
+      "id": 21,
       "title": "Add Notification Bell to Navigation/Header",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "22",
+      "id": 22,
       "title": "Install and Configure Dependencies",
-      "status": "NOT_STARTED",
-      "blocker_category": "compilation"
+      "checked": false
     },
     {
-      "item": "23",
+      "id": 23,
       "title": "Configure Environment Variables",
-      "status": "NOT_STARTED",
-      "blocker_category": "configuration"
+      "checked": false
     },
     {
-      "item": "24",
+      "id": 24,
       "title": "Write Unit Tests: Core Services",
-      "status": "NOT_STARTED",
-      "blocker_category": "testing"
+      "checked": false
+    },
+    {
+      "id": 25,
+      "title": "Write Integration Tests: Controllers and Database",
+      "checked": false
+    },
+    {
+      "id": 26,
+      "title": "Write E2E Tests: Auction Notification Workflow",
+      "checked": false
+    },
+    {
+      "id": 27,
+      "title": "Full Build and Test Pass",
+      "checked": false
     }
   ],
-  "recommendation_summary": {
-    "approve": false,
-    "must_fix_before_merge": [
-      "AUTH_001: Apply authentication guards and JWT extraction to all controllers",
-      "COMPILE_001: Fix all TypeScript errors and missing dependencies in both API and web packages",
-      "SCHEMA_001: Reconcile migration and Prisma schema; validate migration + generated client together",
-      "INTEGRATION_001: Wire event emission from AuctionsModule/SubscriptionsModule and register @OnEvent listeners",
-      "DELIVERY_001: Implement durable outbox and background retry worker or document as deferred Phase N.3"
+  "reviewerAgreement": {
+    "summary": "Both reviewers agree on 7 BLOCKER findings: missing domain-event integration, Prisma composition drift, invalid identity resolution, non-durable delivery with no retry, incomplete authentication, unsupported test claims, and bundled unrelated work. Disagreements are minor (Fable flags SMS rate-limit semantics as MEDIUM; GPT treats as lower priority). Overall consensus: NEEDS_CHANGES.",
+    "blockers_aligned": [
+      "Domain event integration missing (finding 1)",
+      "Prisma schema/migration drift (finding 2)",
+      "Invalid JWT identity in controllers (finding 3)",
+      "Durable delivery + retry absent (finding 6)",
+      "Test coverage unsupported (finding 11)"
     ],
-    "should_fix_before_merge": [
-      "FIND_001: Align client/API route and authentication contracts",
-      "FIND_002: Clarify and document SMS rate-limit scope (global vs per-auction)",
-      "FIND_006: Implement server-driven pagination and authoritative unread count",
-      "FIND_007: Move account screens to App Router and add responsive/keyboard behavior",
-      "FIND_012: Add substantive unit and E2E tests (or document testing phase as deferred)"
-    ],
-    "can_defer_to_phase_n2": [
-      "FIND_013: Unbundle unrelated phases, payment, and artifacts into separate commits",
-      "Fine-tuning performance optimizations (FIND_003)",
-      "Advanced retry strategies (FIND_010)"
+    "high_priority_aligned": [
+      "Browser/API auth contract mismatch (finding 4)",
+      "Preference semantics broken (finding 5)",
+      "PII leaks and unsafe HTML (finding 10)"
     ]
   },
-  "next_steps": [
-    "1. Fix authentication (AUTH_001): Apply @UseGuards(JwtGuard), @CurrentUser() to all controllers.",
-    "2. Fix compilation (COMPILE_001): Resolve all TypeScript errors, add missing dependencies, validate both packages compile.",
-    "3. Fix schema drift (SCHEMA_001): Update modular Prisma sources, regenerate schema, verify migration + client consistency.",
-    "4. Verify event integration (INTEGRATION_001): Confirm AuctionsModule emits events and register @OnEvent listeners in NotificationService, or defer to Phase N.2 with clear documentation.",
-    "5. Implement durable delivery (DELIVERY_001): Add transactional outbox and background retry worker, or document retry behavior as deferred.",
-    "6. Align client/API contracts (FIND_001): Declare one versioning strategy and ensure frontend uses authenticated client.",
-    "7. Add tests (FIND_012): Write unit and E2E tests for core services, adapters, and frontend components.",
-    "8. Split commits (FIND_013): Isolate Phase N notifications from payment, planning, and other artifacts."
+  "nextSteps": [
+    "STOP implementation at plan item 15. Do NOT proceed to event listeners (item 17) until AuctionsModule event emission is confirmed.",
+    "Coordinate with AuctionsModule team: verify EventEmitter2 is wired and events (bid.accepted, break.started, etc.) are emitted post-commit. Item 16 is a BLOCKER checkpoint.",
+    "Fix authentication immediately: apply @UseGuards(JwtGuard), inject @CurrentUser(), resolve User.id via UserIdentity lookup. Item 3 must be resolved before shipping.",
+    "Fix Prisma schema composition: include notifications.prisma in build-schema.mjs or relocate models to identity/support domains. Regenerate client and migrations.",
+    "Implement durable delivery with retry: either transactional outbox or durable queue pattern. No fire-and-forget without recovery.",
+    "Add test coverage: unit tests for services (80%+), integration tests for endpoints and authorization, E2E tests for auction workflows.",
+    "Split Phase N work: remove payments, squad exports, contracts, and other unrelated commits. Push clean notification-only branch.",
+    "Re-run code review after fixes are applied."
   ]
 }
