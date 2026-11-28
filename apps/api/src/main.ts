@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import express from 'express';
 import { VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -23,6 +24,12 @@ async function bootstrap(): Promise<void> {
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalFilters(new AllExceptionsFilter());
   app.enableShutdownHooks();
+
+  // Enable raw body for webhook signature verification (payments)
+  app.use(
+    express.raw({ type: 'application/json', limit: '1mb' }),
+    express.json({ limit: '1mb' }),
+  );
 
   // Internal API docs. Not exposed in production.
   if (config.get('NODE_ENV', { infer: true }) !== 'production') {

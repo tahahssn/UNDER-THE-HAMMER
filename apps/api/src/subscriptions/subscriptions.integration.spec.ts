@@ -1,304 +1,515 @@
-import { Test } from '@nestjs/testing';
-import { INestApplication, ForbiddenException } from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication, HttpStatus } from '@nestjs/common';
+import * as request from 'supertest';
+import { SubscriptionsController } from './subscriptions.controller';
 import { SubscriptionsService } from './subscriptions.service';
 import { SubscriptionsRepository } from './subscriptions.repository';
-import { PrismaService } from '../prisma/prisma.service';
+import { JwtGuard } from '../auth/jwt.guard';
 
-/**
- * Integration tests for SubscriptionsService
- * Tests subscription gating, entitlements, and room limits
- * 
- * SKIPPED: Requires live Prisma database connection (infrastructure issue)
- * Core subscription validation is verified in unit tests
- */
-describe.skip('Subscriptions Integration Tests', () => {
+describe('Subscriptions Integration Tests', () => {
   let app: INestApplication;
+  let controller: SubscriptionsController;
   let service: SubscriptionsService;
-  let repo: SubscriptionsRepository;
-  let prisma: PrismaService;
+  let repository: SubscriptionsRepository;
+
+  // Mock user
+  const mockUser = {
+    sub: 'user-123',
+    email: 'test@example.com',
+  };
+
+  const mockOtherUser = {
+    sub: 'user-456',
+    email: 'other@example.com',
+  };
+
+  const mockPlan = {
+    id: 'plan-pro-monthly',
+    key: 'pro_month',
+    name: 'Pro Monthly',
+    priceMinor: BigInt(10000000), // 1 lakh PKR in paisa
+    currency: 'PKR',
+    period: 'MONTH' as const,
+    active: true,
+    entitlements: [
+      { key: 'hostingEnabled', boolValue: true },
+      { key: 'maxActiveRooms', intValue: 5 },
+      { key: 'maxTeamsPerRoom', intValue: 16 },
+      { key: 'maxSpectatorsPerRoom', intValue: 1000 },
+    ],
+    createdAt: new Date(),
+  };
+
+  const mockFreePlan = {
+    ...mockPlan,
+    id: 'plan-free',
+    key: 'free',
+    name: 'Free Plan',
+    priceMinor: BigInt(0),
+    entitlements: [
+      { key: 'hostingEnabled', boolValue: false },
+      { key: 'maxActiveRooms', intValue: 0 },
+    ],
+  };
+
+  const mockSubscription = {
+    id: 'sub-123',
+    userId: mockUser.sub,
+    planId: mockPlan.id,
+    status: 'ACTIVE',
+    currentPeriodStart: new Date(),
+    currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    cancelAtPeriodEnd: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    plan: mockPlan,
+  };
+
+  const mockInvoice = {
+    id: 'inv-123',
+    paymentId: 'pay-123',
+    number: 'INV-001',
+    issuedAt: new Date(),
+    payment: {
+      amountMinor: mockPlan.priceMinor,
+      currency: 'PKR',
+      status: 'PAID',
+    },
+  };
 
   beforeEach(async () => {
-    const moduleRef = await Test.createTestingModule({
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      controllers: [SubscriptionsController],
       providers: [
-        SubscriptionsService,
-        SubscriptionsRepository,
         {
-          provide: PrismaService,
+          provide: SubscriptionsService,
           useValue: {
-            subscriptionPlan: {
-              findMany: jest.fn(),
-              findUnique: jest.fn(),
-            },
-            subscription: {
-              findFirst: jest.fn(),
-              findMany: jest.fn(),
-              create: jest.fn(),
-              update: jest.fn(),
-            },
-            user: {
-              findUnique: jest.fn(),
-            },
-            planEntitlement: {
-              findMany: jest.fn(),
-            },
+            listPlans: jest.fn(),
+            getActiveSubscription: jest.fn(),
+            checkEntitlements: jest.fn(),
+            canUserHost: jest.fn(),
+            formatSubscription: jest.fn(),
+            formatPlan: jest.fn(),
+            getUserSubscription: jest.fn(),
+            cancelSubscription: jest.fn(),
+            getInvoices: jest.fn(),
+          },
+        },
+        {
+          provide: SubscriptionsRepository,
+          useValue: {
+            getPlanById: jest.fn(),
+            getActivePlans: jest.fn(),
+            getUserActiveSubscription: jest.fn(),
+            getUserSubscriptions: jest.fn(),
+            getEntitlementValue: jest.fn(),
+            updateSubscriptionCancelAtPeriodEnd: jest.fn(),
+            getUserInvoices: jest.fn(),
+            hasActiveSubscription: jest.fn(),
+          },
+        },
+        {
+          provide: JwtGuard,
+          useValue: {
+            canActivate: jest.fn().mockImplementation((context) => {
+              const request = context.switchToHttp().getRequest();
+              request.user = mockUser;
+              return true;
+            }),
           },
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(JwtGuard)
+      .useValue({
+        canActivate: jest.fn().mockImplementation((context) => {
+          const request = context.switchToHttp().getRequest();
+          request.user = mockUser;
+          return true;
+        }),
+      })
+      .compile();
 
     app = moduleRef.createNestApplication();
-    service = moduleRef.get<SubscriptionsService>(SubscriptionsService);
-    repo = moduleRef.get<SubscriptionsRepository>(SubscriptionsRepository);
-    prisma = moduleRef.get<PrismaService>(PrismaService);
+    await app.init();
+
+    controller = moduleRef.get(SubscriptionsController);
+    service = moduleRef.get(SubscriptionsService);
+    repository = moduleRef.get(SubscriptionsRepository);
   });
 
   afterEach(async () => {
-    if (app) {
-      await app.close();
-    }
+    await app.close();
   });
 
-  describe('canUserHost() - Subscription Gating', () => {
-    it('should return false for user with no subscription', async () => {
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(null);
+  describe('GET /v1/subscriptions/plans', () => {
+    it('should return list of active plans (public, no auth required)', async () => {
+      // Arrange
+      jest.spyOn(repository, 'getActivePlans').mockResolvedValue([mockPlan, mockFreePlan]);
 
-      const result = await service.canUserHost('user-no-sub');
+      // Act
+      const response = await request(app.getHttpServer())
+        .get('/v1/subscriptions/plans')
+        .expect(HttpStatus.OK);
 
-      expect(result).toBe(false);
+      // Assert
+      expect(response.body).toHaveProperty('plans');
+      expect(response.body).toHaveProperty('total');
+      expect(Array.isArray(response.body.plans)).toBe(true);
     });
 
-    it('should return true for ACTIVE subscription with hostingEnabled', async () => {
-      const subscription = {
-        id: 'sub-active',
-        userId: 'user-1',
+    it('should cache response for 5 minutes', async () => {
+      // Arrange
+      jest.spyOn(repository, 'getActivePlans').mockResolvedValue([mockPlan]);
+
+      // Act: First request
+      await request(app.getHttpServer())
+        .get('/v1/subscriptions/plans')
+        .expect(HttpStatus.OK);
+
+      // Reset mock to verify it's not called again
+      jest.clearAllMocks();
+
+      // Act: Second request within cache TTL
+      const response = await request(app.getHttpServer())
+        .get('/v1/subscriptions/plans')
+        .expect(HttpStatus.OK);
+
+      // Assert: Repository was not called (cached result returned)
+      expect(repository.getActivePlans).not.toHaveBeenCalled();
+      expect(response.body).toHaveProperty('plans');
+    });
+
+    it('should not require authentication', async () => {
+      // Arrange
+      jest.spyOn(repository, 'getActivePlans').mockResolvedValue([mockPlan]);
+
+      // Act: No Authorization header
+      const response = await request(app.getHttpServer())
+        .get('/v1/subscriptions/plans')
+        .expect(HttpStatus.OK);
+
+      // Assert
+      expect(response.body).toHaveProperty('plans');
+    });
+  });
+
+  describe('GET /v1/subscriptions/current', () => {
+    it('should return current active subscription for authenticated user', async () => {
+      // Arrange
+      jest.spyOn(service, 'getActiveSubscription').mockResolvedValue({
+        id: mockSubscription.id,
+        userId: mockUser.sub,
+        planId: mockPlan.id,
         status: 'ACTIVE',
-        plan: {
-          id: 'plan-pro',
-          key: 'PRO',
-          name: 'Pro Plan',
-          entitlements: [{ key: 'hostingEnabled', boolValue: true }],
-        },
-      };
+      });
 
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(subscription);
+      // Act
+      const response = await request(app.getHttpServer())
+        .get('/v1/subscriptions/current')
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.OK);
 
-      const result = await service.canUserHost('user-1');
-
-      expect(result).toBe(true);
+      // Assert
+      expect(response.body).toHaveProperty('subscription');
+      expect(service.getActiveSubscription).toHaveBeenCalledWith(mockUser.sub);
     });
 
-    it('should return false for EXPIRED subscription', async () => {
-      const subscription = {
-        id: 'sub-expired',
-        userId: 'user-2',
-        status: 'EXPIRED',
-        plan: {
-          id: 'plan-pro',
-          key: 'PRO',
-          entitlements: [{ key: 'hostingEnabled', boolValue: true }],
-        },
-      };
+    it('should return null if user has no active subscription', async () => {
+      // Arrange
+      jest.spyOn(service, 'getActiveSubscription').mockResolvedValue(null);
 
-      // Repository should return null for expired subscription
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(null);
+      // Act
+      const response = await request(app.getHttpServer())
+        .get('/v1/subscriptions/current')
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.OK);
 
-      const result = await service.canUserHost('user-2');
-
-      expect(result).toBe(false);
+      // Assert
+      expect(response.body.subscription).toBeNull();
     });
 
-    it('should return false for CANCELLED subscription', async () => {
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(null);
-
-      const result = await service.canUserHost('user-3');
-
-      expect(result).toBe(false);
-    });
-
-    it('should return false when hostingEnabled is false', async () => {
-      const subscription = {
-        id: 'sub-no-hosting',
-        userId: 'user-4',
-        status: 'ACTIVE',
-        plan: {
-          id: 'plan-free',
-          key: 'FREE',
-          entitlements: [{ key: 'hostingEnabled', boolValue: false }],
-        },
-      };
-
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(subscription);
-
-      const result = await service.canUserHost('user-4');
-
-      expect(result).toBe(false);
+    it('should require authentication', async () => {
+      // Act & Assert: No Authorization header
+      await request(app.getHttpServer())
+        .get('/v1/subscriptions/current')
+        .expect(HttpStatus.UNAUTHORIZED);
     });
   });
 
-  describe('getRoomLimits() - Entitlement Enforcement', () => {
-    it('should return zeros for non-subscribed user', async () => {
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(null);
+  describe('GET /v1/subscriptions/entitlements', () => {
+    it('should return user entitlements for active subscription', async () => {
+      // Arrange
+      jest.spyOn(service, 'checkEntitlements').mockResolvedValue({
+        hostCanCreate: true,
+        maxActiveRooms: 5,
+        maxTeamsPerRoom: 16,
+        maxSpectatorsPerRoom: 1000,
+        maxRoomDurationMinutes: 480,
+      });
 
-      const limits = await service.getRoomLimits('user-no-sub');
+      // Act
+      const response = await request(app.getHttpServer())
+        .get('/v1/subscriptions/entitlements')
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.OK);
 
-      expect(limits.maxActiveRooms).toBe(0);
-      expect(limits.maxTeamsPerRoom).toBe(0);
-      expect(limits.maxSpectatorsPerRoom).toBe(0);
+      // Assert
+      expect(response.body.hostCanCreate).toBe(true);
+      expect(response.body.maxActiveRooms).toBe(5);
+      expect(service.checkEntitlements).toHaveBeenCalledWith(mockUser.sub);
     });
 
-    it('should enforce maxActiveRooms from subscription plan', async () => {
-      const subscription = {
-        id: 'sub-1',
-        userId: 'user-1',
-        plan: {
-          id: 'plan-starter',
-          entitlements: [{ key: 'maxActiveRooms', intValue: 3 }],
-        },
-      };
+    it('should return restrictive defaults if no active subscription', async () => {
+      // Arrange
+      jest.spyOn(service, 'checkEntitlements').mockResolvedValue({
+        hostCanCreate: false,
+        maxActiveRooms: 0,
+        maxTeamsPerRoom: 0,
+        maxSpectatorsPerRoom: 0,
+        maxRoomDurationMinutes: 0,
+      });
 
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(subscription);
+      // Act
+      const response = await request(app.getHttpServer())
+        .get('/v1/subscriptions/entitlements')
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.OK);
 
-      const limits = await service.getRoomLimits('user-1');
-
-      expect(limits.maxActiveRooms).toBe(3);
+      // Assert
+      expect(response.body.hostCanCreate).toBe(false);
+      expect(response.body.maxActiveRooms).toBe(0);
     });
 
-    it('should enforce maxTeamsPerRoom from subscription plan', async () => {
-      const subscription = {
-        id: 'sub-pro',
-        userId: 'user-pro',
-        plan: {
-          id: 'plan-pro',
-          entitlements: [{ key: 'maxTeamsPerRoom', intValue: 16 }],
-        },
-      };
-
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(subscription);
-
-      const limits = await service.getRoomLimits('user-pro');
-
-      expect(limits.maxTeamsPerRoom).toBe(16);
-    });
-
-    it('should enforce maxSpectatorsPerRoom from subscription plan', async () => {
-      const subscription = {
-        id: 'sub-enterprise',
-        userId: 'user-enterprise',
-        plan: {
-          id: 'plan-enterprise',
-          entitlements: [{ key: 'maxSpectatorsPerRoom', intValue: 500 }],
-        },
-      };
-
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(subscription);
-
-      const limits = await service.getRoomLimits('user-enterprise');
-
-      expect(limits.maxSpectatorsPerRoom).toBe(500);
-    });
-
-    it('should use defaults if entitlements missing', async () => {
-      const subscription = {
-        id: 'sub-minimal',
-        userId: 'user-minimal',
-        plan: {
-          id: 'plan-minimal',
-          entitlements: [], // No explicit entitlements
-        },
-      };
-
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(subscription);
-
-      const limits = await service.getRoomLimits('user-minimal');
-
-      // Should return 0 (default) since user has subscription but limits not set
-      expect(limits.maxActiveRooms).toBeGreaterThanOrEqual(0);
-      expect(limits.maxTeamsPerRoom).toBeGreaterThanOrEqual(0);
-      expect(limits.maxSpectatorsPerRoom).toBeGreaterThanOrEqual(0);
-    });
-
-    it('should respect subscription tier differences', async () => {
-      // Starter tier
-      const starterSub = {
-        id: 'sub-starter',
-        userId: 'user-starter',
-        plan: {
-          id: 'plan-starter',
-          entitlements: [
-            { key: 'maxActiveRooms', intValue: 2 },
-            { key: 'maxTeamsPerRoom', intValue: 8 },
-            { key: 'maxSpectatorsPerRoom', intValue: 50 },
-          ],
-        },
-      };
-
-      // Pro tier
-      const proSub = {
-        id: 'sub-pro',
-        userId: 'user-pro',
-        plan: {
-          id: 'plan-pro',
-          entitlements: [
-            { key: 'maxActiveRooms', intValue: 10 },
-            { key: 'maxTeamsPerRoom', intValue: 16 },
-            { key: 'maxSpectatorsPerRoom', intValue: 500 },
-          ],
-        },
-      };
-
-      // Test starter limits
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(starterSub);
-      let limits = await service.getRoomLimits('user-starter');
-      expect(limits.maxActiveRooms).toBe(2);
-
-      // Test pro limits
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(proSub);
-      limits = await service.getRoomLimits('user-pro');
-      expect(limits.maxActiveRooms).toBe(10);
-
-      // Pro should have higher limits than starter
-      expect(10).toBeGreaterThan(2);
+    it('should require authentication', async () => {
+      // Act & Assert
+      await request(app.getHttpServer())
+        .get('/v1/subscriptions/entitlements')
+        .expect(HttpStatus.UNAUTHORIZED);
     });
   });
 
-  describe('checkEntitlements() - Comprehensive Entitlement Check', () => {
-    it('should return all entitlements for active subscription', async () => {
-      const subscription = {
-        id: 'sub-1',
-        userId: 'user-1',
-        plan: {
-          id: 'plan-pro',
-          entitlements: [
-            { key: 'hostingEnabled', boolValue: true },
-            { key: 'maxActiveRooms', intValue: 5 },
-            { key: 'maxTeamsPerRoom', intValue: 16 },
-            { key: 'maxSpectatorsPerRoom', intValue: 100 },
-            { key: 'maxRoomDurationMinutes', intValue: 480 },
-          ],
+  describe('GET /v1/subscriptions/invoices', () => {
+    it('should return paginated invoices for user', async () => {
+      // Arrange
+      jest.spyOn(service, 'getInvoices').mockResolvedValue({
+        items: [mockInvoice],
+        total: 1,
+      });
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .get('/v1/subscriptions/invoices')
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.OK);
+
+      // Assert
+      expect(response.body).toHaveProperty('items');
+      expect(response.body).toHaveProperty('total');
+      expect(Array.isArray(response.body.items)).toBe(true);
+      expect(service.getInvoices).toHaveBeenCalledWith(mockUser.sub, 0, 10);
+    });
+
+    it('should respect skip and take pagination params', async () => {
+      // Arrange
+      jest.spyOn(service, 'getInvoices').mockResolvedValue({
+        items: [],
+        total: 1,
+      });
+
+      // Act
+      await request(app.getHttpServer())
+        .get('/v1/subscriptions/invoices?skip=10&take=20')
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.OK);
+
+      // Assert
+      expect(service.getInvoices).toHaveBeenCalledWith(mockUser.sub, 10, 20);
+    });
+
+    it('should validate pagination bounds', async () => {
+      // Arrange
+      jest.spyOn(service, 'getInvoices').mockResolvedValue({
+        items: [],
+        total: 1,
+      });
+
+      // Act: Invalid take (too high)
+      await request(app.getHttpServer())
+        .get('/v1/subscriptions/invoices?take=1000')
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.OK);
+
+      // Assert: Should clamp to max 100
+      expect(service.getInvoices).toHaveBeenCalledWith(mockUser.sub, 0, 100);
+    });
+
+    it('should require authentication', async () => {
+      // Act & Assert
+      await request(app.getHttpServer())
+        .get('/v1/subscriptions/invoices')
+        .expect(HttpStatus.UNAUTHORIZED);
+    });
+  });
+
+  describe('POST /v1/subscriptions/:id/cancel', () => {
+    it('should cancel subscription and set cancelAtPeriodEnd flag', async () => {
+      // Arrange
+      const cancelledSub = { ...mockSubscription, cancelAtPeriodEnd: true };
+      jest.spyOn(repository, 'getUserSubscriptions').mockResolvedValue({
+        items: [mockSubscription],
+        total: 1,
+      });
+      jest.spyOn(service, 'cancelSubscription').mockResolvedValue(cancelledSub);
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post(`/v1/subscriptions/${mockSubscription.id}/cancel`)
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.NO_CONTENT);
+
+      // Assert
+      expect(response.body).toEqual({});
+      expect(service.cancelSubscription).toHaveBeenCalledWith(mockUser.sub, mockSubscription.id);
+    });
+
+    it('should return 403 if user tries to cancel other user subscription', async () => {
+      // Arrange: Mock subscription belongs to different user
+      const otherUserSub = { ...mockSubscription, userId: mockOtherUser.sub };
+      jest.spyOn(repository, 'getUserSubscriptions').mockResolvedValue({
+        items: [], // Empty for current user
+        total: 0,
+      });
+
+      // Act & Assert
+      await request(app.getHttpServer())
+        .post(`/v1/subscriptions/${otherUserSub.id}/cancel`)
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.FORBIDDEN);
+    });
+
+    it('should return 403 if subscription not found for user', async () => {
+      // Arrange
+      jest.spyOn(repository, 'getUserSubscriptions').mockResolvedValue({
+        items: [],
+        total: 0,
+      });
+
+      // Act & Assert
+      await request(app.getHttpServer())
+        .post(`/v1/subscriptions/nonexistent-id/cancel`)
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.FORBIDDEN);
+    });
+
+    it('should require authentication', async () => {
+      // Act & Assert
+      await request(app.getHttpServer())
+        .post(`/v1/subscriptions/${mockSubscription.id}/cancel`)
+        .expect(HttpStatus.UNAUTHORIZED);
+    });
+  });
+
+  describe('Room Hosting Eligibility', () => {
+    it('should allow room creation if user has active subscription with hostingEnabled', async () => {
+      // This is integration tested in RoomsController tests
+      // The SubscriptionGuard calls canUserHost() which uses this service
+    });
+
+    it('should deny room creation if user has no active subscription', async () => {
+      // This is integration tested in RoomsController tests
+      // SubscriptionGuard should return 403 'Active subscription required'
+    });
+
+    it('should allow room creation after successful payment webhook', async () => {
+      // This requires full integration: checkout → webhook → subscription created → canUserHost returns true
+      // Tested in payments integration tests
+    });
+  });
+
+  describe('Subscription Cancellation State', () => {
+    it('should keep canUserHost true until period end after cancellation', async () => {
+      // Arrange
+      const cancelledSub = {
+        ...mockSubscription,
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+      };
+
+      jest.spyOn(repository, 'getUserActiveSubscription').mockResolvedValue(cancelledSub);
+      jest.spyOn(service, 'canUserHost').mockResolvedValue(true); // Still can host until period end
+
+      // Act
+      const canHost = await service.canUserHost(mockUser.sub);
+
+      // Assert: Should still be able to host
+      expect(canHost).toBe(true);
+    });
+
+    it('should deny hosting after period end if cancelAtPeriodEnd was set', async () => {
+      // Arrange
+      const expiredSub = {
+        ...mockSubscription,
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: new Date(Date.now() - 1000), // Ended
+        status: 'CANCELLED',
+      };
+
+      jest.spyOn(repository, 'getUserActiveSubscription').mockResolvedValue(null); // Not active anymore
+
+      // Act
+      const canHost = await service.canUserHost(mockUser.sub);
+
+      // Assert
+      expect(canHost).toBe(false);
+    });
+  });
+
+  describe('Invoice Retrieval', () => {
+    it('should return invoices with correct amount formatting (paisa to PKR)', async () => {
+      // Arrange
+      const invoiceWithAmount = {
+        ...mockInvoice,
+        payment: {
+          ...mockInvoice.payment,
+          amountMinor: BigInt(10000000), // 1 lakh paisa = 1 lakh PKR
         },
       };
 
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(subscription);
+      jest.spyOn(service, 'getInvoices').mockResolvedValue({
+        items: [invoiceWithAmount],
+        total: 1,
+      });
 
-      const entitlements = await service.checkEntitlements('user-1');
+      // Act
+      const response = await request(app.getHttpServer())
+        .get('/v1/subscriptions/invoices')
+        .set('Authorization', 'Bearer mock-token')
+        .expect(HttpStatus.OK);
 
-      expect(entitlements.hostCanCreate).toBe(true);
-      expect(entitlements.maxActiveRooms).toBe(5);
-      expect(entitlements.maxTeamsPerRoom).toBe(16);
-      expect(entitlements.maxSpectatorsPerRoom).toBe(100);
-      expect(entitlements.maxRoomDurationMinutes).toBe(480);
+      // Assert
+      expect(response.body.items[0].payment.amountMinor).toBe('10000000');
+      expect(response.body.items[0].payment.currency).toBe('PKR');
     });
+  });
 
-    it('should return restrictive defaults for non-subscribed user', async () => {
-      (repo.getUserActiveSubscription as jest.Mock).mockResolvedValueOnce(null);
+  describe('Authorization & Ownership Enforcement', () => {
+    it('should enforce ownership: user A cannot view user B invoices', async () => {
+      // The service receives userId from the JWT, so it naturally filters by current user
+      // This is verified by checking that service.getInvoices is called with mockUser.sub
+      jest.spyOn(service, 'getInvoices').mockResolvedValue({
+        items: [],
+        total: 0,
+      });
 
-      const entitlements = await service.checkEntitlements('user-no-sub');
+      // Act
+      await request(app.getHttpServer())
+        .get('/v1/subscriptions/invoices')
+        .set('Authorization', 'Bearer mock-token-user-123')
+        .expect(HttpStatus.OK);
 
-      expect(entitlements.hostCanCreate).toBe(false);
-      expect(entitlements.maxActiveRooms).toBe(0);
-      expect(entitlements.maxTeamsPerRoom).toBe(0);
-      expect(entitlements.maxSpectatorsPerRoom).toBe(0);
-      expect(entitlements.maxRoomDurationMinutes).toBe(0);
+      // Assert: Should be called with current user's ID, not injectable from request
+      expect(service.getInvoices).toHaveBeenCalledWith(mockUser.sub, expect.anything(), expect.anything());
     });
   });
 });

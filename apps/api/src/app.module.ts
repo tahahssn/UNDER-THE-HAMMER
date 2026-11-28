@@ -14,6 +14,7 @@ import { PlayerCategoriesModule } from './player-categories/player-categories.mo
 import { TeamsModule } from './teams/teams.module';
 import { FilesModule } from './files/files.module';
 import { AssetModerationModule } from './asset-moderation/asset-moderation.module';
+import { PaymentsModule } from './payments/payments.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { TournamentsModule } from './tournaments/tournaments.module';
 import { RoomsModule } from './rooms/rooms.module';
@@ -47,6 +48,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     TeamsModule,
     FilesModule,
     AssetModerationModule,
+    PaymentsModule,
     SubscriptionsModule,
     TournamentsModule,
     RoomsModule,

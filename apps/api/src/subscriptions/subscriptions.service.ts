@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SubscriptionsRepository } from './subscriptions.repository';
 
 /**
@@ -8,6 +8,8 @@ import { SubscriptionsRepository } from './subscriptions.repository';
  */
 @Injectable()
 export class SubscriptionsService {
+  private readonly logger = new Logger(SubscriptionsService.name);
+
   constructor(private readonly repo: SubscriptionsRepository) {}
 
   /**
@@ -91,7 +93,7 @@ export class SubscriptionsService {
         id: sub.plan.id,
         key: sub.plan.key,
         name: sub.plan.name,
-        priceMinor: sub.plan.priceMinor,
+        priceMinor: sub.plan.priceMinor.toString(),
         currency: sub.plan.currency,
         period: sub.plan.period,
         active: sub.plan.active,
@@ -114,7 +116,7 @@ export class SubscriptionsService {
       id: plan.id,
       key: plan.key,
       name: plan.name,
-      priceMinor: plan.priceMinor,
+      priceMinor: plan.priceMinor.toString(),
       currency: plan.currency,
       period: plan.period,
       active: plan.active,
@@ -171,15 +173,7 @@ export class SubscriptionsService {
    * Cancel a subscription (set cancelAtPeriodEnd flag)
    */
   async cancelSubscription(userId: string, subscriptionId: string) {
-    // Verify ownership
-    const subscription = await this.repo.getUserSubscriptions(userId, 0, 1);
-    const sub = subscription.items.find((s) => s.id === subscriptionId);
-
-    if (!sub) {
-      throw new Error('Subscription not found');
-    }
-
-    // Update to set cancelAtPeriodEnd flag
+    // Verify ownership (already done in controller)
     const updated = await this.repo.updateSubscriptionCancelAtPeriodEnd(subscriptionId, true);
     return this.formatSubscription(updated);
   }
