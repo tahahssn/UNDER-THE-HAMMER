@@ -1,5 +1,5 @@
 import { Injectable, UnauthorizedException, BadRequestException, NotFoundException, Logger, Inject } from '@nestjs/common';
-import { PaymentsRepository } from './payments.repository.ts';
+import { PaymentsRepository } from './payments.repository';
 import { PaymentPurpose, PaymentStatus } from '@prisma/client';
 import type { SafePayWebhookPayload } from './safepay.types';
 import crypto from 'crypto';
