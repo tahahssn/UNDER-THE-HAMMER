@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckoutResponse, SubscriptionPlan } from '@uth/contracts';
 import { api } from '@/lib/api';
 
@@ -17,6 +17,8 @@ interface UseCheckoutReturn {
  * Accepts planId and optional idempotencyKey.
  * Returns checkout URL for SafePay redirect.
  * Caches response so duplicate calls return same URL without new API requests.
+ * 
+ * Cache is invalidated when planId prop changes to prevent checkout for wrong plan.
  */
 export const useCheckout = (planId: string, idempotencyKey?: string): UseCheckoutReturn => {
   const [isLoading, setIsLoading] = useState(false);
@@ -27,6 +29,14 @@ export const useCheckout = (planId: string, idempotencyKey?: string): UseCheckou
   const MAX_RETRIES = 3;
 
   const generatedIdempotencyKey = useMemo(() => idempotencyKey || crypto.randomUUID(), [idempotencyKey]);
+
+  // Invalidate cache when planId changes (critical: prevents checkout for wrong plan)
+  useEffect(() => {
+    setCheckoutUrl(null);
+    setSessionId(null);
+    setError(null);
+    setRetryCount(0);
+  }, [planId]);
 
   const initiateCheckout = useCallback(async () => {
     // If we already have a checkout URL, don't make a new request

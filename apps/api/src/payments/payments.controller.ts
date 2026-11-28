@@ -90,7 +90,13 @@ export class PaymentsController {
       throw new BadRequestException('Subscription plan not found or inactive');
     }
 
-    // 2. Call SafepayService to create checkout session
+    // 2. Fetch user profile for checkout metadata (customerEmail, customerName)
+    // User is already authenticated, fetch their profile to include in SafePay metadata
+    const userProfile = await this.subscriptionsRepository.getUserProfile(user.sub);
+    const customerEmail = userProfile?.user.email || undefined;
+    const customerName = userProfile?.displayName || undefined;
+
+    // 3. Call SafepayService to create checkout session
     // SafepayService handles idempotency internally
     try {
       const response = await this.safepayService.createCheckoutSession(
@@ -100,6 +106,8 @@ export class PaymentsController {
         plan.name,
         plan.currency,
         'safepay', // providerConfigId
+        customerEmail,
+        customerName,
         undefined, // idempotencyKey — SafepayService will generate one
       );
 
@@ -130,8 +138,9 @@ export class PaymentsController {
    *
    * - No authentication (signature verification instead)
    * - Returns: 202 Accepted on success or retriable error
-   * - 401: Invalid webhook signature
-   * - 202: Processing error (SafePay will retry)
+   * - 401: Invalid webhook signature (fatal)
+   * - 400/404: Business logic errors (fatal, don't retry)
+   * - 202: Processing error (SafePay will retry on retriable errors only)
    *
    * Webhook signature verification:
    * - SafePay sends X-Safepay-Signature header containing HMAC-SHA256(payload, secret)
@@ -179,7 +188,7 @@ export class PaymentsController {
 
     this.logger.debug(`Webhook event received: ${payload.id} (${payload.type})`);
 
-    // 3. Process webhook (SafepayService handles signature verification)
+    // 3. Process webhook (SafepayService handles signature verification and error classification)
     try {
       await this.safepayService.processWebhook(
         payload,
@@ -192,14 +201,27 @@ export class PaymentsController {
       return { acknowledged: true };
     } catch (error) {
       if (error instanceof UnauthorizedException) {
-        // Signature invalid: return 401
+        // Signature invalid: return 401 (fatal, don't retry)
         this.logger.warn(`Invalid webhook signature for event ${payload.id}`);
         throw error;
       }
 
-      // Any other error: return 202 so SafePay retries
-      this.logger.error(`Error processing webhook ${payload.id}:`, error);
-      return { acknowledged: false, error: String(error) };
+      // Check if error is retriable (infrastructure issue) or fatal (business logic error)
+      const isRetriable = (error as any).isRetriable ?? true; // Default to retriable for safety
+      
+      if (isRetriable) {
+        // Retriable error: return 202 so SafePay retries
+        this.logger.warn(`Retriable error processing webhook ${payload.id}:`, error);
+        return { 
+          acknowledged: false, 
+          error: String(error),
+          retriable: true,
+        };
+      } else {
+        // Fatal business logic error: return 400 so SafePay doesn't retry
+        this.logger.error(`Fatal error processing webhook ${payload.id}:`, error);
+        throw new BadRequestException(String(error));
+      }
     }
   }
 }

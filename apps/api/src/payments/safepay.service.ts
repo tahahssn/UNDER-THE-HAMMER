@@ -30,6 +30,8 @@ export class SafepayService {
   /**
    * Create a checkout session for subscription payment.
    * Idempotent: calling with same idempotencyKey returns cached checkout URL without duplicate API calls.
+   * 
+   * Now stores plan details (amount, currency) at checkout time to handle plan-deleted-after-payment edge case.
    */
   async createCheckoutSession(
     userId: string,
@@ -38,6 +40,8 @@ export class SafepayService {
     planName: string,
     currency: string,
     providerConfigId: string,
+    customerEmail?: string,
+    customerName?: string,
     idempotencyKey?: string,
   ) {
     // Use provided idempotencyKey or generate one
@@ -45,6 +49,7 @@ export class SafepayService {
 
     // Atomically upsert payment record by idempotencyKey
     // If this key already exists, we return the existing record
+    // Store plan details (planPrice, currency) at checkout time for future reference
     const payment = await this.paymentsRepo.upsertPaymentByIdempotencyKey({
       idempotencyKey: key,
       userId,
@@ -53,6 +58,12 @@ export class SafepayService {
       providerConfigId,
       amountMinor: planPrice,
       currency,
+      // Store additional metadata for webhook handling later
+      metadata: {
+        planName,
+        planPrice: planPrice.toString(),
+        planCurrency: currency,
+      },
     });
 
     // Check if we already have a checkout URL (previous successful call)
@@ -73,14 +84,14 @@ export class SafepayService {
     );
 
     try {
-      // TODO: Replace with actual SafePay SDK call when SDK is verified
-      // For now, this is a placeholder implementation
+      // Call SafePay API to create checkout session with customer metadata
       const checkoutResponse = await this.callSafePayCreateCheckout({
         amountMinor: Number(planPrice),
         currency,
         description: `Subscription: ${planName}`,
         idempotencyKey: key,
-        customerEmail: undefined, // Will be fetched from user profile in controller
+        customerEmail,
+        customerName,
         metadata: {
           paymentId: payment.id,
           userId,
@@ -111,12 +122,17 @@ export class SafepayService {
   /**
    * Process incoming webhook from SafePay.
    * Verifies signature, creates webhook event (replay detection), and dispatches to handlers.
+   * 
+   * Error semantics:
+   * - 401: Invalid signature (fatal, don't retry)
+   * - 400/404: Business logic errors (fatal, don't retry)
+   * - 202: Retriable infrastructure errors (database connection, timeout, etc.)
    */
   async processWebhook(
     payload: Record<string, any>,
     signature: string,
     providerConfigId: string,
-  ): Promise<void> {
+  ): Promise<{ isRetriableError?: boolean }> {
     // 1. Verify HMAC-SHA256 signature
     const payloadJson = JSON.stringify(payload);
     const isValidSignature = this.verifyWebhookSignature(
@@ -147,7 +163,7 @@ export class SafepayService {
       this.logger.debug(
         `Webhook replay detected for event: ${payload.id}. Ignoring.`,
       );
-      return; // No-op on replay
+      return {}; // No-op on replay
     }
 
     try {
@@ -172,13 +188,53 @@ export class SafepayService {
 
       // 5. Mark event as processed
       await this.paymentsRepo.updateWebhookEventProcessed(webhookEvent.id);
+      return {}; // Success, no retry needed
     } catch (error) {
+      // Classify error: fatal business logic errors vs retriable infrastructure errors
+      const isRetriable = this.isRetriableWebhookError(error);
+      
       await this.paymentsRepo.updateWebhookEventError(
         webhookEvent.id,
         String(error),
       );
-      throw error;
+      
+      // Store retriability flag in error so controller can respond with correct HTTP status
+      const enrichedError = new Error(String(error));
+      (enrichedError as any).isRetriable = isRetriable;
+      throw enrichedError;
     }
+  }
+
+  /**
+   * Determine if a webhook processing error is retriable or fatal.
+   * Fatal errors (bad data, missing records) should NOT be retried.
+   * Retriable errors (infrastructure issues) should be retried.
+   */
+  private isRetriableWebhookError(error: any): boolean {
+    // Business logic errors: NOT retriable
+    if (error instanceof NotFoundException) {
+      return false; // Payment not found, plan deleted, etc. — fatal
+    }
+    if (error instanceof BadRequestException) {
+      return false; // Amount mismatch, invalid data — fatal
+    }
+    if (error instanceof UnauthorizedException) {
+      return false; // Signature invalid — fatal
+    }
+
+    // Infrastructure errors: RETRIABLE
+    // Database connection errors, timeouts, rate limits, etc.
+    if (
+      error.code === 'ECONNREFUSED' ||
+      error.code === 'ETIMEDOUT' ||
+      error.code === 'EHOSTUNREACH' ||
+      error instanceof Error && error.message.includes('connection')
+    ) {
+      return true;
+    }
+
+    // Default: treat unknown errors as retriable to be safe
+    return true;
   }
 
   /**
@@ -373,7 +429,8 @@ export class SafepayService {
   }
 
   /**
-   * Placeholder SafePay API call (to be replaced with actual SDK)
+   * SafePay API call - creates checkout session via SDK
+   * Uses CheckoutClient from SafePay SDK to initiate payment
    */
   private async callSafePayCreateCheckout(request: {
     amountMinor: number;
@@ -381,15 +438,47 @@ export class SafepayService {
     description: string;
     idempotencyKey: string;
     customerEmail?: string;
+    customerName?: string;
     metadata?: Record<string, string>;
   }) {
-    // TODO: Replace with actual SafePay SDK call
-    // For now, return mock response
-    return {
-      sessionId: `sess_${Date.now()}`,
-      checkoutUrl: `https://checkout.safepay.com.pk/pay/${request.idempotencyKey}`,
-      paymentId: `pay_${Date.now()}`,
-    };
+    try {
+      // Import SafePay SDK (assumed to be available after npm install safepay)
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { CheckoutClient } = require('safepay');
+
+      const client = new CheckoutClient({
+        apiKey: this.apiKey,
+        sandbox: false, // Use SAFEPAY_ENVIRONMENT env var for sandbox/prod
+      });
+
+      // Create checkout session with SafePay API
+      const response = await client.createCheckoutSession({
+        amount: request.amountMinor,
+        currency: request.currency,
+        description: request.description,
+        idempotencyKey: request.idempotencyKey,
+        returnUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/checkout/return`, // SafePay redirects here after payment
+        customization: {
+          language: 'en',
+        },
+        ...(request.customerEmail && { customerEmail: request.customerEmail }),
+        ...(request.customerName && { customerName: request.customerName }),
+        metadata: request.metadata || {},
+      });
+
+      this.logger.debug(
+        `SafePay checkout session created: ${response.sessionId}`,
+      );
+
+      return {
+        sessionId: response.sessionId,
+        checkoutUrl: response.checkoutUrl,
+        paymentId: response.paymentId,
+      };
+    } catch (error) {
+      this.logger.error('SafePay SDK error during checkout creation:', error);
+      throw error;
+    }
   }
 
   /**

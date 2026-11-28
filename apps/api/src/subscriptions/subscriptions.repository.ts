@@ -151,4 +151,23 @@ export class SubscriptionsRepository {
 
     return { items, total };
   }
+
+  /**
+   * Get user profile with email and display name for checkout metadata
+   */
+  async getUserProfile(userId: string) {
+    return this.prisma.userProfile.findUnique({
+      where: { userId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+          },
+        },
+      },
+    });
+  }
 }
+
