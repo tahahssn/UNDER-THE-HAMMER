@@ -198,7 +198,7 @@ export class AuctionsController {
   async exportSquad(
     @Param('auctionId') auctionId: string,
     @Query('format') format: string | undefined,
-    @CurrentUser('sub') userId: string,
+    @CurrentUser() userId: string,
     @Res() res: Response
   ) {
     // Validate format parameter (required)

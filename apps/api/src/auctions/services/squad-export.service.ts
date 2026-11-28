@@ -7,7 +7,6 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-// @ts-ignore - papaparse doesn't have TypeScript types
 import Papa from 'papaparse';
 import ExcelJS from 'exceljs';
 import { ExportFormat, SquadExportResponse, ComplianceStatusDetail } from '@uth/contracts';
@@ -39,19 +38,21 @@ export class SquadExportService {
     auctionId: string,
     userId: string
   ): Promise<{ isHost: boolean; authorizedTeamId?: string }> {
-    // Check if room exists and get its host
-    const room = await this.prisma.auctionRoom.findFirst({
-      where: {
-        auction: { id: auctionId },
+    // Get auction with room info to check host
+    const auction = await this.prisma.auction.findUnique({
+      where: { id: auctionId },
+      select: {
+        id: true,
+        room: { select: { id: true, hostId: true } },
       },
-      select: { id: true, hostId: true },
     });
 
-    if (!room) {
-      throw new NotFoundException('Auction room not found');
+    if (!auction) {
+      throw new NotFoundException('Auction not found');
     }
 
-    if (room.hostId === userId) {
+    // Check if user is host
+    if (auction.room.hostId === userId) {
       return { isHost: true };
     }
 
@@ -82,8 +83,8 @@ export class SquadExportService {
   ): Promise<SquadExportResponse> {
     // Wrap reads in transaction for consistency
     return await this.prisma.$transaction(
-      async (tx: any) => {
-        const auction = await tx.auction.findUnique({
+      async (tx) => {
+        const auction = await (tx as typeof this.prisma).auction.findUnique({
           where: { id: auctionId },
           select: {
             id: true,
@@ -100,7 +101,7 @@ export class SquadExportService {
         // Filter teams: if authorizedTeamId provided, return only that team
         const teamFilter = authorizedTeamId ? { id: authorizedTeamId } : {};
 
-        const teams = await tx.auctionTeam.findMany({
+        const teams = await (tx as typeof this.prisma).auctionTeam.findMany({
           where: { auctionId, ...teamFilter },
           include: {
             team: { select: { name: true, primaryColor: true } },
@@ -120,12 +121,17 @@ export class SquadExportService {
                   },
                 },
               },
-              orderBy: { createdAt: 'asc' },
+              orderBy: { settledAt: 'asc' },
             },
             owners: {
               where: { releasedAt: null },
               include: {
-                user: { select: { id: true, displayName: true } },
+                user: {
+                  select: {
+                    id: true,
+                    profile: { select: { displayName: true } },
+                  },
+                },
               },
             },
             validations: {
@@ -143,34 +149,29 @@ export class SquadExportService {
                 },
               },
             },
-            purseLedger: {
-              select: { amountMinor: true },
-              orderBy: { createdAt: 'desc' },
-              take: 1,
-            },
           },
         });
 
         return {
           auctionId: auction.id,
-          auctionName: `Auction-${auction.id.substring(0, 8)}`, // No separate name in schema
+          auctionName: `Auction-${auction.id.substring(0, 8)}`,
           roomName: auction.room.name,
           exportedAt: new Date().toISOString(),
-          teams: teams.map((team: any) => ({
+          teams: teams.map((team) => ({
             auctionTeamId: team.id,
             teamName: team.team.name,
             teamColor: team.team.primaryColor || '#000000',
-            owners: team.owners.map((owner: any) => ({
+            owners: team.owners.map((owner) => ({
               userId: owner.userId,
-              displayName: owner.user.displayName || `User ${owner.userId.substring(0, 8)}`,
+              displayName: owner.user.profile?.displayName || `User ${owner.userId.substring(0, 8)}`,
             })),
-            acquisitions: team.acquisitions.map((acq: any) => ({
+            acquisitions: team.acquisitions.map((acq) => ({
               playerName: acq.auctionPlayer.player.displayName,
               playerRole: acq.auctionPlayer.player.role,
               playerCategory: acq.auctionPlayer.player.category?.name || 'Uncategorized',
-              priceMinor: acq.priceMinor.toString(), // BigInt → string
+              priceMinor: acq.priceMinor.toString(),
             })),
-            purseBalanceMinor: team.purseBalanceMinor.toString(), // BigInt → string
+            purseBalanceMinor: team.purseBalanceMinor.toString(),
             complianceStatus: this.formatComplianceStatus(team.validations[0]),
           })),
         };
@@ -190,7 +191,7 @@ export class SquadExportService {
         rows.push({
           teamName: this.escapeFormulaInjection(team.teamName),
           teamColor: team.teamColor,
-          teamOwners: team.owners.map((o) => o.displayName).join(', '),
+          teamOwners: this.escapeFormulaInjection(team.owners.map((o) => o.displayName).join(', ')),
           playerName: '(no players)',
           playerRole: '',
           playerCategory: '',
@@ -203,9 +204,9 @@ export class SquadExportService {
           rows.push({
             teamName: this.escapeFormulaInjection(team.teamName),
             teamColor: team.teamColor,
-            teamOwners: team.owners.map((o) => o.displayName).join(', '),
+            teamOwners: this.escapeFormulaInjection(team.owners.map((o) => o.displayName).join(', ')),
             playerName: this.escapeFormulaInjection(acq.playerName),
-            playerRole: acq.playerRole,
+            playerRole: this.escapeFormulaInjection(acq.playerRole),
             playerCategory: acq.playerCategory,
             acquisitionPriceMinor: acq.priceMinor,
             purseBalanceMinor: team.purseBalanceMinor,
@@ -252,20 +253,22 @@ export class SquadExportService {
       const headerRow = worksheet.addRow(headers);
       headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
       headerRow.fill = {
-        type: 'pattern' as any,
+        type: 'pattern',
         pattern: 'solid',
         fgColor: { argb: 'FF4472C4' },
       };
       headerRow.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
-      worksheet.views = [{ state: 'frozen' as any, ySplit: 1 }];
+      worksheet.views = [{ state: 'frozen', ySplit: 1 }];
 
       for (const team of data.teams) {
+        const ownerDisplay = this.escapeFormulaInjection(team.owners.map((o) => o.displayName).join(', '));
+        
         if (team.acquisitions.length === 0) {
           worksheet.addRow([
             this.escapeFormulaInjection(team.teamName),
             team.teamColor,
-            team.owners.map((o) => o.displayName).join(', '),
+            ownerDisplay,
             '(no players)',
             '',
             '',
@@ -278,9 +281,9 @@ export class SquadExportService {
             worksheet.addRow([
               this.escapeFormulaInjection(team.teamName),
               team.teamColor,
-              team.owners.map((o) => o.displayName).join(', '),
+              ownerDisplay,
               this.escapeFormulaInjection(acq.playerName),
-              acq.playerRole,
+              this.escapeFormulaInjection(acq.playerRole),
               acq.playerCategory,
               acq.priceMinor,
               team.purseBalanceMinor,
@@ -304,7 +307,7 @@ export class SquadExportService {
 
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber > 1) {
-          row.eachCell((cell: any) => {
+          row.eachCell((cell) => {
             cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
             if (cell.col >= 7 && cell.col <= 8) {
               cell.alignment = { horizontal: 'right', vertical: 'middle' };
@@ -313,7 +316,7 @@ export class SquadExportService {
         }
       });
 
-      return (await workbook.xlsx.writeBuffer()) as unknown as Buffer;
+      return (await workbook.xlsx.writeBuffer()) as Buffer;
     } catch (error) {
       this.logger.error(`XLSX export failed for auction ${auctionId}`, error);
       throw new InternalServerErrorException('Failed to generate XLSX export');

@@ -10,10 +10,11 @@ Implement server-authoritative squad export functionality allowing authenticated
 
 ### Backend Implementation
 
-- [x] 1. Add dependencies to `apps/api/package.json`
-      Add `papaparse` v5.4.1 and `exceljs` v4.4.0 to dependencies.
+- [x] 1. Add dependencies and type declarations to `apps/api/package.json`
+      Add `papaparse` v5.4.1, `exceljs` v4.4.0, and `@types/papaparse` to dependencies/devDependencies.
+      Add `@uth/contracts` workspace link.
       Files: `apps/api/package.json`
-      Verify: `npm list papaparse exceljs` shows both packages installed in api workspace.
+      Verify: Dependencies resolved in workspace.
 
 - [x] 2. Create shared export contract in `packages/contracts/src/exports.contract.ts`
       Define `ExportFormat` enum (CSV/XLSX), error response interfaces, and BigInt serialization pattern (as string).

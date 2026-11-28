@@ -2,16 +2,19 @@
 
 import { useState, useCallback } from 'react';
 import { ExportFormat } from '@uth/contracts';
+import { getAuthToken } from '@/lib/api';
 
 interface UseSquadExportState {
   export: (format: ExportFormat) => Promise<void>;
   loading: boolean;
   error: string | null;
+  success: boolean;
 }
 
 export const useSquadExport = (auctionId: string, auctionName: string, roomName: string): UseSquadExportState => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
   const generateFilename = useCallback((format: ExportFormat): string => {
     const shortId = auctionId.substring(0, 8);
@@ -34,9 +37,10 @@ export const useSquadExport = (auctionId: string, auctionName: string, roomName:
     async (format: ExportFormat) => {
       setLoading(true);
       setError(null);
+      setSuccess(false);
 
       try {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken();
         if (!token) {
           throw new Error('Authentication required');
         }
@@ -63,10 +67,21 @@ export const useSquadExport = (auctionId: string, auctionName: string, roomName:
           throw new Error('Export file is empty');
         }
 
+        // Parse filename from Content-Disposition header if available
+        const contentDisposition = response.headers.get('content-disposition');
+        let filename = generateFilename(format);
+        
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+          if (filenameMatch && filenameMatch[1]) {
+            filename = filenameMatch[1];
+          }
+        }
+
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = generateFilename(format);
+        link.download = filename;
 
         document.body.appendChild(link);
         link.click();
@@ -75,6 +90,7 @@ export const useSquadExport = (auctionId: string, auctionName: string, roomName:
         URL.revokeObjectURL(url);
 
         setError(null);
+        setSuccess(true);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'An error occurred during export';
         setError(errorMessage);
@@ -86,5 +102,5 @@ export const useSquadExport = (auctionId: string, auctionName: string, roomName:
     [auctionId, generateFilename]
   );
 
-  return { export: handleExport, loading, error };
+  return { export: handleExport, loading, error, success };
 };

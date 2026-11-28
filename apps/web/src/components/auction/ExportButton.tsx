@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Download, Loader2, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Download, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import { ExportFormat } from '@uth/contracts';
 import { useSquadExport } from '../../hooks/useSquadExport';
 
@@ -18,8 +18,18 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
   roomName,
   disabled = false,
 }) => {
-  const { export: exportSquad, loading, error } = useSquadExport(auctionId, auctionName, roomName);
+  const { export: exportSquad, loading, error, success } = useSquadExport(auctionId, auctionName, roomName);
   const [errorDismissed, setErrorDismissed] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // Hide success message after 3 seconds
+  useEffect(() => {
+    if (success) {
+      setShowSuccess(true);
+      const timer = setTimeout(() => setShowSuccess(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [success]);
 
   const handleCsvExport = async () => {
     setErrorDismissed(false);
@@ -57,12 +67,19 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
         </div>
       )}
 
+      {showSuccess && (
+        <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded">
+          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+          <p className="text-sm text-green-700 dark:text-green-300">Export completed successfully!</p>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row gap-2">
         <button
           onClick={handleCsvExport}
           disabled={disabled || loading}
           className="
-            flex items-center justify-center gap-2 px-4 py-2
+            flex items-center justify-center gap-2 px-4 min-h-[44px]
             bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed
             dark:bg-blue-600 dark:hover:bg-blue-700 dark:disabled:bg-gray-700
             text-white text-sm font-medium rounded
@@ -70,17 +87,18 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
             cursor-pointer
           "
           title="Download squad data as CSV"
+          aria-label="Export squad as CSV"
         >
-          <Download className="w-4 h-4" />
+          <Download className="w-4 h-4 flex-shrink-0" />
           <span>CSV</span>
-          {loading && <Loader2 className="w-4 h-4 animate-spin ml-1" />}
+          {loading && <Loader2 className="w-4 h-4 animate-spin ml-1 flex-shrink-0" />}
         </button>
 
         <button
           onClick={handleXlsxExport}
           disabled={disabled || loading}
           className="
-            flex items-center justify-center gap-2 px-4 py-2
+            flex items-center justify-center gap-2 px-4 min-h-[44px]
             bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed
             dark:bg-green-600 dark:hover:bg-green-700 dark:disabled:bg-gray-700
             text-white text-sm font-medium rounded
@@ -88,10 +106,11 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
             cursor-pointer
           "
           title="Download squad data as Excel"
+          aria-label="Export squad as Excel"
         >
-          <Download className="w-4 h-4" />
+          <Download className="w-4 h-4 flex-shrink-0" />
           <span>XLSX</span>
-          {loading && <Loader2 className="w-4 h-4 animate-spin ml-1" />}
+          {loading && <Loader2 className="w-4 h-4 animate-spin ml-1 flex-shrink-0" />}
         </button>
       </div>
 
@@ -99,7 +118,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
         <p className="text-xs text-slate-600 dark:text-slate-400">Generating export...</p>
       )}
 
-      {!loading && !error && (
+      {!loading && !error && !showSuccess && (
         <p className="text-xs text-slate-500 dark:text-slate-400">
           Download squad data in CSV or Excel format.
         </p>
