@@ -10,7 +10,8 @@
     },
     "types": ["node", "vitest/globals"],
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "noEmitOnError": false
   },
   "include": ["src/**/*.ts", "../../packages/contracts/src/**/*.ts"],
   "exclude": ["src/**/__tests__/**", "src/**/*.spec.ts", "node_modules"]
