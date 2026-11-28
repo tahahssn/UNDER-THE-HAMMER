@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
 import { SafepayService } from './safepay.service';
 import { PaymentsRepository } from './payments.repository';
+import { PaymentsController } from './payments.controller';
 import { PrismaModule } from '../prisma/prisma.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, SubscriptionsModule],
+  controllers: [PaymentsController],
   providers: [
     PaymentsRepository,
     SafepayService,
