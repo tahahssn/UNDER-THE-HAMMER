@@ -13,47 +13,38 @@ import { ExportFormat } from '@uth/contracts';
 export interface ExportDataRow {
   teamName: string;
   teamColor: string;
-  teamOwners: string; // comma-separated display names
+  teamOwners: string;
   playerName: string;
   playerRole: string;
   playerCategory: string;
-  acquisitionPriceMinor: string; // BigInt as string
-  purseBalanceMinor: string; // BigInt as string
-  complianceStatus: string; // human-readable status
+  acquisitionPriceMinor: string;
+  purseBalanceMinor: string;
+  complianceStatus: string;
 }
 
 @Injectable()
 export class SquadExportService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Verify user is authorized to export this auction (host or active team owner).
-   * Throws ForbiddenException or NotFoundException if not authorized.
-   */
   async verifyExportAuthorization(auctionId: string, userId: string): Promise<void> {
     const auction = await this.prisma.auction.findUnique({
       where: { id: auctionId },
-      select: {
-        id: true,
-        hostId: true,
-      },
+      select: { id: true, hostId: true },
     });
 
     if (!auction) {
       throw new NotFoundException('Auction not found');
     }
 
-    // User is host
     if (auction.hostId === userId) {
       return;
     }
 
-    // User is an active team owner in this auction
     const isTeamOwner = await this.prisma.teamOwner.findFirst({
       where: {
         auctionId,
         userId,
-        releasedAt: null, // Only active owners
+        releasedAt: null,
       },
     });
 
@@ -62,49 +53,25 @@ export class SquadExportService {
     }
   }
 
-  /**
-   * Fetch and structure all squad data for export.
-   * Uses optimized Prisma query with includes to avoid N+1 queries.
-   */
   async getSquadExportData(auctionId: string) {
     const auction = await this.prisma.auction.findUnique({
       where: { id: auctionId },
-      select: {
-        id: true,
-        name: true,
-        room: {
-          select: {
-            name: true,
-          },
-        },
-      },
+      select: { id: true, name: true, room: { select: { name: true } } },
     });
 
     if (!auction) {
       throw new NotFoundException('Auction not found');
     }
 
-    // Fetch all teams with their acquisitions, owners, and squad validations
     const teams = await this.prisma.auctionTeam.findMany({
       where: { auctionId },
       include: {
-        team: {
-          select: {
-            name: true,
-            primaryColor: true,
-          },
-        },
+        team: { select: { name: true, primaryColor: true } },
         acquisitions: {
           include: {
             auctionPlayer: {
               include: {
-                player: {
-                  select: {
-                    name: true,
-                    role: true,
-                    category: true,
-                  },
-                },
+                player: { select: { name: true, role: true, category: true } },
               },
             },
           },
@@ -112,37 +79,20 @@ export class SquadExportService {
         },
         owners: {
           where: { releasedAt: null },
-          include: {
-            user: {
-              select: {
-                id: true,
-                username: true,
-                email: true,
-              },
-            },
-          },
+          include: { user: { select: { id: true, username: true, email: true } } },
         },
         squadValidations: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          include: {
-            violations: true,
-          },
+          include: { violations: true },
         },
       },
     });
 
-    // Fetch purse balances for all teams
     const purseBalances = await this.prisma.teamPurseTransaction.groupBy({
       by: ['auctionTeamId'],
-      where: {
-        auctionTeamId: {
-          in: teams.map((t) => t.id),
-        },
-      },
-      _sum: {
-        amountChangeMinor: true,
-      },
+      where: { auctionTeamId: { in: teams.map((t) => t.id) } },
+      _sum: { amountChangeMinor: true },
     });
 
     const purseMap = new Map(
@@ -174,10 +124,6 @@ export class SquadExportService {
     };
   }
 
-  /**
-   * Export squad data to CSV format.
-   * Returns CSV string with BigInt values serialized as strings.
-   */
   async exportSquadCsv(auctionId: string, userId: string): Promise<string> {
     await this.verifyExportAuthorization(auctionId, userId);
     const data = await this.getSquadExportData(auctionId);
@@ -186,7 +132,6 @@ export class SquadExportService {
 
     for (const team of data.teams) {
       if (team.acquisitions.length === 0) {
-        // Add placeholder row for empty teams
         rows.push({
           teamName: team.teamName,
           teamColor: team.teamColor,
@@ -199,7 +144,6 @@ export class SquadExportService {
           complianceStatus: team.complianceStatus,
         });
       } else {
-        // Add one row per acquisition
         for (const acq of team.acquisitions) {
           rows.push({
             teamName: team.teamName,
@@ -216,7 +160,6 @@ export class SquadExportService {
       }
     }
 
-    // Use papaparse to generate CSV with proper escaping
     const csv = Papa.unparse(rows, {
       header: true,
       quotes: true,
@@ -227,10 +170,6 @@ export class SquadExportService {
     return csv;
   }
 
-  /**
-   * Export squad data to XLSX format.
-   * Returns XLSX Buffer with styled headers and formatting.
-   */
   async exportSquadXlsx(auctionId: string, userId: string): Promise<Buffer> {
     await this.verifyExportAuthorization(auctionId, userId);
     const data = await this.getSquadExportData(auctionId);
@@ -238,7 +177,6 @@ export class SquadExportService {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Squad');
 
-    // Define header columns
     const headers = [
       'Team Name',
       'Team Color',
@@ -251,23 +189,15 @@ export class SquadExportService {
       'Compliance Status',
     ];
 
-    // Add header row
     const headerRow = worksheet.addRow(headers);
     headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    headerRow.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF4472C4' },
-    };
+    headerRow.fill = { type: 'pattern' as any, pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
     headerRow.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
-    // Freeze panes at row 1 (header row)
-    worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+    worksheet.views = [{ state: 'frozen' as any, ySplit: 1 }];
 
-    // Add data rows
     for (const team of data.teams) {
       if (team.acquisitions.length === 0) {
-        // Add placeholder row for empty teams
         worksheet.addRow([
           team.teamName,
           team.teamColor,
@@ -280,7 +210,6 @@ export class SquadExportService {
           team.complianceStatus,
         ]);
       } else {
-        // Add one row per acquisition
         for (const acq of team.acquisitions) {
           worksheet.addRow([
             team.teamName,
@@ -297,7 +226,6 @@ export class SquadExportService {
       }
     }
 
-    // Set column widths and alignment for all data cells
     worksheet.columns = [
       { width: 20 },
       { width: 15 },
@@ -310,27 +238,20 @@ export class SquadExportService {
       { width: 30 },
     ];
 
-    // Apply alignment and number formatting to data rows
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber > 1) {
         row.eachCell((cell) => {
           cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
           if (cell.columnNumber >= 7 && cell.columnNumber <= 8) {
-            // Price and balance columns: right-aligned
             cell.alignment = { horizontal: 'right', vertical: 'middle' };
           }
         });
       }
     });
 
-    // Generate and return XLSX buffer
-    return await workbook.xlsx.writeBuffer() as Buffer;
+    return (await workbook.xlsx.writeBuffer()) as Buffer;
   }
 
-  /**
-   * Format compliance status from latest squad validation record.
-   * Returns human-readable compliance string or status indicator.
-   */
   private formatComplianceStatus(validation: any): string {
     if (!validation) {
       return 'Unknown';
@@ -346,22 +267,14 @@ export class SquadExportService {
     return 'Compliant';
   }
 
-  /**
-   * Generate sanitized filename for export.
-   * Pattern: squad_export_{first_8_chars_of_auctionId}_{format}_{ISO_DATE}.{ext}
-   */
   generateFilename(auctionId: string, format: ExportFormat, auctionName?: string): string {
     const sanitized = this.sanitizeFilename(auctionName || 'export');
     const shortId = auctionId.substring(0, 8);
-    const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const timestamp = new Date().toISOString().split('T')[0];
     const ext = format === ExportFormat.CSV ? 'csv' : 'xlsx';
     return `squad_export_${shortId}_${sanitized}_${timestamp}.${ext}`;
   }
 
-  /**
-   * Sanitize filename by removing special characters.
-   * Fallback to 'export' if result is empty.
-   */
   private sanitizeFilename(input: string): string {
     let sanitized = input.replace(/[^\w\s\-.]/g, '_');
     sanitized = sanitized.replace(/[\s_]+/g, '_').trim().replace(/^_|_$/g, '');

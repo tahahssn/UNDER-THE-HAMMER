@@ -12,11 +12,6 @@ interface ExportButtonProps {
   disabled?: boolean;
 }
 
-/**
- * Export button component for squad exports.
- * Displays CSV and XLSX buttons with loading and error states.
- * Conditionally renders only if authorized and auction is completed.
- */
 export const ExportButton: React.FC<ExportButtonProps> = ({
   auctionId,
   auctionName,
@@ -42,13 +37,11 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
 
   return (
     <div className="flex flex-col gap-3 p-4 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/50 dark:to-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Export Squad</h3>
         {loading && <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />}
       </div>
 
-      {/* Error State */}
       {error && !errorDismissed && (
         <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded">
           <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
@@ -64,9 +57,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
         </div>
       )}
 
-      {/* Button Group */}
       <div className="flex flex-col sm:flex-row gap-2">
-        {/* CSV Export Button */}
         <button
           onClick={handleCsvExport}
           disabled={disabled || loading}
@@ -85,7 +76,6 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
           {loading && <Loader2 className="w-4 h-4 animate-spin ml-1" />}
         </button>
 
-        {/* XLSX Export Button */}
         <button
           onClick={handleXlsxExport}
           disabled={disabled || loading}
@@ -105,12 +95,10 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
         </button>
       </div>
 
-      {/* Loading State Description */}
       {loading && (
         <p className="text-xs text-slate-600 dark:text-slate-400">Generating export...</p>
       )}
 
-      {/* Success Indicator (optional, can be enhanced with toast) */}
       {!loading && !error && (
         <p className="text-xs text-slate-500 dark:text-slate-400">
           Download squad data in CSV or Excel format.

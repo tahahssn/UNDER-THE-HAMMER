@@ -4,7 +4,7 @@ export enum ExportFormat {
 }
 
 export interface SquadExportRequestDto {
-  format: ExportFormat | string; // Validation happens on backend
+  format: ExportFormat | string;
 }
 
 export interface ExportErrorResponse {
@@ -14,30 +14,26 @@ export interface ExportErrorResponse {
   timestamp: string;
 }
 
-/**
- * BigInt values (priceMinor, purseBalanceMinor) are serialized as JSON strings.
- * Frontend should parse with BigInt(value) for calculations or Number(value) for display.
- */
 export interface SquadExportResponse {
   auctionId: string;
   auctionName: string;
   roomName: string;
-  exportedAt: string; // ISO 8601 UTC
+  exportedAt: string;
   teams: Array<{
     auctionTeamId: string;
     teamName: string;
     teamColor: string;
     owners: Array<{
       userId: string;
-      displayName: string; // username || email || 'User {id}'
+      displayName: string;
     }>;
     acquisitions: Array<{
       playerName: string;
       playerRole: string;
       playerCategory: string;
-      priceMinor: string; // BigInt as string
+      priceMinor: string;
     }>;
-    purseBalanceMinor: string; // BigInt as string
+    purseBalanceMinor: string;
     complianceStatus: {
       valid: boolean;
       violations: Array<{
