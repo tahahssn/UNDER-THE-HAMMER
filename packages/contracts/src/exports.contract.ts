@@ -14,6 +14,16 @@ export interface ExportErrorResponse {
   timestamp: string;
 }
 
+export interface ComplianceStatusDetail {
+  valid: boolean;
+  violations: Array<{
+    ruleType: string;
+    currentCount: number;
+    requiredMin?: number;
+    requiredMax?: number;
+  }>;
+}
+
 export interface SquadExportResponse {
   auctionId: string;
   auctionName: string;
@@ -34,14 +44,6 @@ export interface SquadExportResponse {
       priceMinor: string;
     }>;
     purseBalanceMinor: string;
-    complianceStatus: {
-      valid: boolean;
-      violations: Array<{
-        ruleType: string;
-        currentCount: number;
-        requiredMin?: number;
-        requiredMax?: number;
-      }>;
-    };
+    complianceStatus: ComplianceStatusDetail;
   }>;
 }

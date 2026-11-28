@@ -7,9 +7,10 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+// @ts-ignore - papaparse doesn't have TypeScript types
 import Papa from 'papaparse';
 import ExcelJS from 'exceljs';
-import { ExportFormat, SquadExportResponse } from '@uth/contracts';
+import { ExportFormat, SquadExportResponse, ComplianceStatusDetail } from '@uth/contracts';
 
 export interface ExportDataRow {
   teamName: string;
@@ -81,7 +82,7 @@ export class SquadExportService {
   ): Promise<SquadExportResponse> {
     // Wrap reads in transaction for consistency
     return await this.prisma.$transaction(
-      async (tx) => {
+      async (tx: any) => {
         const auction = await tx.auction.findUnique({
           where: { id: auctionId },
           select: {
@@ -155,15 +156,15 @@ export class SquadExportService {
           auctionName: `Auction-${auction.id.substring(0, 8)}`, // No separate name in schema
           roomName: auction.room.name,
           exportedAt: new Date().toISOString(),
-          teams: teams.map((team) => ({
+          teams: teams.map((team: any) => ({
             auctionTeamId: team.id,
             teamName: team.team.name,
             teamColor: team.team.primaryColor || '#000000',
-            owners: team.owners.map((owner) => ({
+            owners: team.owners.map((owner: any) => ({
               userId: owner.userId,
               displayName: owner.user.displayName || `User ${owner.userId.substring(0, 8)}`,
             })),
-            acquisitions: team.acquisitions.map((acq) => ({
+            acquisitions: team.acquisitions.map((acq: any) => ({
               playerName: acq.auctionPlayer.player.displayName,
               playerRole: acq.auctionPlayer.player.role,
               playerCategory: acq.auctionPlayer.player.category?.name || 'Uncategorized',
@@ -195,7 +196,7 @@ export class SquadExportService {
           playerCategory: '',
           acquisitionPriceMinor: '',
           purseBalanceMinor: team.purseBalanceMinor,
-          complianceStatus: this.escapeFormulaInjection(team.complianceStatus),
+          complianceStatus: this.formatComplianceStatusString(team.complianceStatus),
         });
       } else {
         for (const acq of team.acquisitions) {
@@ -208,7 +209,7 @@ export class SquadExportService {
             playerCategory: acq.playerCategory,
             acquisitionPriceMinor: acq.priceMinor,
             purseBalanceMinor: team.purseBalanceMinor,
-            complianceStatus: this.escapeFormulaInjection(team.complianceStatus),
+            complianceStatus: this.formatComplianceStatusString(team.complianceStatus),
           });
         }
       }
@@ -270,7 +271,7 @@ export class SquadExportService {
             '',
             '',
             team.purseBalanceMinor,
-            this.escapeFormulaInjection(team.complianceStatus),
+            this.formatComplianceStatusString(team.complianceStatus),
           ]);
         } else {
           for (const acq of team.acquisitions) {
@@ -283,7 +284,7 @@ export class SquadExportService {
               acq.playerCategory,
               acq.priceMinor,
               team.purseBalanceMinor,
-              this.escapeFormulaInjection(team.complianceStatus),
+              this.formatComplianceStatusString(team.complianceStatus),
             ]);
           }
         }
@@ -303,16 +304,16 @@ export class SquadExportService {
 
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber > 1) {
-          row.eachCell((cell) => {
+          row.eachCell((cell: any) => {
             cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-            if (cell.columnNumber >= 7 && cell.columnNumber <= 8) {
+            if (cell.col >= 7 && cell.col <= 8) {
               cell.alignment = { horizontal: 'right', vertical: 'middle' };
             }
           });
         }
       });
 
-      return (await workbook.xlsx.writeBuffer()) as Buffer;
+      return (await workbook.xlsx.writeBuffer()) as unknown as Buffer;
     } catch (error) {
       this.logger.error(`XLSX export failed for auction ${auctionId}`, error);
       throw new InternalServerErrorException('Failed to generate XLSX export');
@@ -320,20 +321,12 @@ export class SquadExportService {
   }
 
   /**
-   * Format compliance status to structured object for export.
+   * Format compliance status to structured object for contract.
    * Returns { valid: boolean, violations: [...] }
    */
   private formatComplianceStatus(
     validation: any
-  ): {
-    valid: boolean;
-    violations: Array<{
-      ruleType: string;
-      currentCount: number;
-      requiredMin?: number;
-      requiredMax?: number;
-    }>;
-  } {
+  ): ComplianceStatusDetail {
     if (!validation) {
       return { valid: true, violations: [] };
     }
@@ -351,6 +344,24 @@ export class SquadExportService {
     }
 
     return { valid: true, violations: [] };
+  }
+
+  /**
+   * Convert compliance status to human-readable string for CSV/XLSX export.
+   */
+  private formatComplianceStatusString(status: ComplianceStatusDetail): string {
+    if (status.valid) {
+      return 'Compliant';
+    }
+
+    if (status.violations.length === 0) {
+      return 'Compliant';
+    }
+
+    const violationSummary = status.violations
+      .map((v) => `${v.ruleType}:${v.currentCount}`)
+      .join(', ');
+    return `Violations: ${violationSummary}`;
   }
 
   /**
