@@ -607,4 +607,26 @@ export const startAuction = async (roomId: string): Promise<ApiResponse<any>> =>
   }
 };
 
-export default api;
+// Invoice endpoints - Phase L
+export const getInvoices = async (params?: {
+  skip?: number;
+  take?: number;
+}): Promise<ApiResponse<any>> => {
+  try {
+    const response = await api.get('/v1/subscriptions/invoices', {
+      params: {
+        skip: params?.skip ?? 0,
+        take: params?.take ?? 10,
+      },
+    });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Failed to fetch invoices',
+    };
+  }
+};
+
+// Export api instance for direct use in hooks
+export { api };

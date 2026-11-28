@@ -16,3 +16,20 @@ export * from "./rooms.contract";
 export * from "./realtime.contract";
 export * from "./exports.contract";
 
+// Payment-related exports (selective to avoid conflicts)
+export type {
+  CheckoutResponse,
+  CreateCheckoutRequest,
+  SubscriptionPlan,
+  Subscription,
+  GetCurrentSubscriptionResponse,
+  Invoice,
+  GetInvoicesResponse,
+  ListPlansResponse,
+  CancelSubscriptionRequest,
+  CancelSubscriptionResponse,
+  CheckEntitlementsResponse,
+  PaymentStatus,
+  Payment,
+} from "../payments.dto";
+

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as Redis from 'ioredis';
+import { Redis } from 'ioredis';
 
 /**
  * Rate limiting service for SMS dispatch.
@@ -9,7 +9,7 @@ import * as Redis from 'ioredis';
  */
 @Injectable()
 export class RateLimitService {
-  private redis: Redis.Redis;
+  private redis: Redis;
   private readonly windowMinutes: number;
   private readonly maxPerWindow: number;
 
@@ -51,7 +51,7 @@ export class RateLimitService {
       throw new Error('Redis pipeline failed');
     }
 
-    const attempts = (results[0][1] as number) || 1;
+    const attempts = (results[0]?.[1] as number) || 1;
     const isLimited = attempts > this.maxPerWindow;
 
     return {

@@ -1,0 +1,21 @@
+{
+  "name": "@uth/contracts",
+  "version": "1.0.0",
+  "description": "Shared contracts and DTOs for UTH applications",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "dependencies": {
+    "zod": "^3.22.4"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT"
+}

@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as sgMail from '@sendgrid/mail';
-import { PrismaService } from '@uth/database';
+import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDeliveryService } from './notification-delivery.service';
+import { DeliveryStatus } from '../dto/notification-delivery.dto';
 
 /**
  * Email delivery adapter using SendGrid.
@@ -41,7 +42,7 @@ export class EmailAdapterService {
         this.logger.warn('SENDGRID_API_KEY not configured; skipping email send');
         await this.deliveryService.updateDeliveryStatus(
           deliveryRecordId,
-          'FAILED',
+          DeliveryStatus.FAILED,
           'SENDGRID_NOT_CONFIGURED',
         );
         return;
@@ -57,7 +58,7 @@ export class EmailAdapterService {
         this.logger.error(`User email not found for user ${userId}`);
         await this.deliveryService.updateDeliveryStatus(
           deliveryRecordId,
-          'FAILED',
+          DeliveryStatus.FAILED,
           'NOTIFICATION_EMAIL_NOT_FOUND',
         );
         return;
@@ -90,21 +91,23 @@ export class EmailAdapterService {
       this.logger.debug(`Email sent to ${user.email} for notification ${notificationId}`);
       await this.deliveryService.updateDeliveryStatus(
         deliveryRecordId,
-        'SENT',
+        DeliveryStatus.SENT,
         undefined,
         new Date(),
       );
     } catch (error) {
-      this.logger.error(`Email delivery failed: ${error.message}`, error);
-      const errorMessage = error.response?.body?.errors?.[0]?.message || error.message;
+      this.logger.error(`Email delivery failed: ${error instanceof Error ? error.message : String(error)}`, error);
+      const errorMessage = error instanceof Error && 'response' in error 
+        ? (error as any).response?.body?.errors?.[0]?.message || error.message
+        : String(error);
       try {
         await this.deliveryService.updateDeliveryStatus(
           deliveryRecordId,
-          'FAILED',
+          DeliveryStatus.FAILED,
           errorMessage,
         );
       } catch (updateError) {
-        this.logger.error(`Failed to update delivery status: ${updateError.message}`);
+        this.logger.error(`Failed to update delivery status: ${updateError instanceof Error ? updateError.message : String(updateError)}`);
       }
     }
   }

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '@uth/database';
+import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationIntent, NotificationCategory } from '../dto/notification.dto';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationDeliveryService } from './notification-delivery.service';
@@ -104,13 +104,13 @@ export class NotificationService {
         intent.userId,
       ).catch((error) => {
         this.logger.error(
-          `Error dispatching to channels: ${error.message}`,
+          `Error dispatching to channels: ${error instanceof Error ? error.message : String(error)}`,
           error,
         );
       });
     } catch (error) {
       this.logger.error(
-        `Failed to dispatch notification for user ${intent.userId}: ${error.message}`,
+        `Failed to dispatch notification for user ${intent.userId}: ${error instanceof Error ? error.message : String(error)}`,
         error,
       );
     }

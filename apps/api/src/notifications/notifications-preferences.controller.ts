@@ -9,7 +9,9 @@ import {
   HttpStatus,
   BadRequestException,
 } from '@nestjs/common';
-import { ZodValidationPipe } from '@nestjs/common';
+import { JwtGuard } from '../auth/jwt.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { NotificationPreferencesService } from './services/notification-preferences.service';
 import {
   UpdatePreferenceRequest,
@@ -21,6 +23,7 @@ import {
  * All endpoints require JwtGuard authentication.
  */
 @Controller('v1/notifications/preferences')
+@UseGuards(JwtGuard)
 export class NotificationPreferencesController {
   constructor(
     private preferencesService: NotificationPreferencesService,
@@ -32,11 +35,8 @@ export class NotificationPreferencesController {
    */
   @Get()
   async getUserPreferences(
-    // @CurrentUser() user: CurrentUserDto,
+    @CurrentUser('sub') userId: string,
   ) {
-    // TODO: Extract userId from JWT
-    const userId = 'user-id-from-jwt'; // Placeholder
-
     const preferences = await this.preferencesService.getUserPreferences(userId);
     return {
       data: preferences,
@@ -59,14 +59,11 @@ export class NotificationPreferencesController {
   @Post(':category')
   @HttpCode(HttpStatus.OK)
   async updatePreferencesForCategory(
-    // @CurrentUser() user: CurrentUserDto,
+    @CurrentUser('sub') userId: string,
     @Param('category') category: string,
     @Body(new ZodValidationPipe(UpdatePreferenceRequestSchema))
     request: UpdatePreferenceRequest,
   ) {
-    // TODO: Extract userId from JWT
-    const userId = 'user-id-from-jwt'; // Placeholder
-
     try {
       const preferences = await this.preferencesService.updatePreferencesForCategory(
         userId,
@@ -77,7 +74,7 @@ export class NotificationPreferencesController {
         data: preferences,
       };
     } catch (error) {
-      if (error.message.includes('Unknown notification category')) {
+      if (error instanceof Error && error.message.includes('Unknown notification category')) {
         throw new BadRequestException(error.message);
       }
       throw error;

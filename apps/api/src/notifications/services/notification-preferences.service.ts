@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '@uth/database';
+import { PrismaService } from '../../prisma/prisma.service';
 import { UserPreferenceDto, EnabledChannels } from '../dto/notification-preference.dto';
 import { NotificationCategory } from '../dto/notification.dto';
 
@@ -78,7 +78,7 @@ export class NotificationPreferencesService {
     category: string,
     channels: { email?: boolean; sms?: boolean; inApp?: boolean },
   ): Promise<UserPreferenceDto[]> {
-    if (!this.recognizedCategories.includes(category)) {
+    if (!this.recognizedCategories.includes(category as NotificationCategory)) {
       throw new BadRequestException(`Unknown notification category: ${category}`);
     }
 
@@ -143,9 +143,9 @@ export class NotificationPreferencesService {
     };
 
     for (const pref of prefs) {
-      const channelKey = pref.channel.toLowerCase();
+      const channelKey = pref.channel.toLowerCase() as keyof EnabledChannels;
       if (channels.hasOwnProperty(channelKey)) {
-        channels[channelKey as keyof EnabledChannels] = pref.enabled;
+        channels[channelKey] = pref.enabled;
       }
     }
 

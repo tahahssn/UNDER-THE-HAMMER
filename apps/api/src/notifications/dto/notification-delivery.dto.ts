@@ -8,15 +8,15 @@ export enum DeliveryStatus {
  * Delivery tracking record for a notification sent to a specific channel.
  */
 export class NotificationDeliveryDto {
-  id: string;
-  notificationId: string;
-  channel: string;
-  status: DeliveryStatus;
-  attempts: number;
+  id!: string;
+  notificationId!: string;
+  channel!: string;
+  status!: DeliveryStatus;
+  attempts!: number;
   sentAt?: Date;
   error?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt!: Date;
+  updatedAt!: Date;
 
   static fromPrisma(record: any): NotificationDeliveryDto {
     return {

@@ -10,14 +10,14 @@ export enum NotificationCategory {
 }
 
 export class NotificationDto {
-  id: string;
-  userId: string;
-  category: NotificationCategory;
-  title: string;
+  id!: string;
+  userId!: string;
+  category!: NotificationCategory;
+  title!: string;
   body?: string;
   data?: Record<string, any>;
-  read: boolean; // Derived from readAt !== null
-  createdAt: Date;
+  read!: boolean; // Derived from readAt !== null
+  createdAt!: Date;
 
   /**
    * Transform from Prisma Notification model to DTO.

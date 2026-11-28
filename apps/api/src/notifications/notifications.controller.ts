@@ -12,6 +12,8 @@ import {
   BadRequestException,
   Query,
 } from '@nestjs/common';
+import { JwtGuard } from '../auth/jwt.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { NotificationService } from './services/notification.service';
 import { NotificationDto } from './dto/notification.dto';
 
@@ -20,6 +22,7 @@ import { NotificationDto } from './dto/notification.dto';
  * All endpoints require JwtGuard authentication.
  */
 @Controller('v1/notifications')
+@UseGuards(JwtGuard)
 export class NotificationsController {
   constructor(private notificationService: NotificationService) {}
 
@@ -29,16 +32,13 @@ export class NotificationsController {
    */
   @Get()
   async getNotifications(
-    // @CurrentUser() user: CurrentUserDto,  // Requires JwtGuard decorator
+    @CurrentUser('sub') userId: string,
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '20',
     @Query('category') category?: string,
   ) {
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
-
-    // TODO: Extract userId from JWT claim via @CurrentUser() decorator
-    const userId = 'user-id-from-jwt'; // Placeholder
 
     let result;
     if (category) {
@@ -57,7 +57,7 @@ export class NotificationsController {
     }
 
     return {
-      data: result.data.map((n) => NotificationDto.fromPrisma(n)),
+      data: result.data.map((n: any) => NotificationDto.fromPrisma(n)),
       pagination: result.pagination,
     };
   }
@@ -70,22 +70,19 @@ export class NotificationsController {
   @Post(':id/mark-read')
   @HttpCode(HttpStatus.NO_CONTENT)
   async markNotificationAsRead(
-    // @CurrentUser() user: CurrentUserDto,
+    @CurrentUser('sub') userId: string,
     @Param('id') notificationId: string,
   ): Promise<void> {
-    // TODO: Extract userId from JWT
-    const userId = 'user-id-from-jwt'; // Placeholder
-
     try {
       await this.notificationService.markNotificationAsRead(
         notificationId,
         userId,
       );
     } catch (error) {
-      if (error.message.includes('not found')) {
+      if (error instanceof Error && error.message.includes('not found')) {
         throw new NotFoundException('Notification not found');
       }
-      if (error.message.includes('access denied')) {
+      if (error instanceof Error && error.message.includes('access denied')) {
         throw new ForbiddenException('Access denied');
       }
       throw error;
@@ -99,11 +96,8 @@ export class NotificationsController {
   @Post('mark-all-read')
   @HttpCode(HttpStatus.NO_CONTENT)
   async markAllAsRead(
-    // @CurrentUser() user: CurrentUserDto,
+    @CurrentUser('sub') userId: string,
   ): Promise<void> {
-    // TODO: Extract userId from JWT
-    const userId = 'user-id-from-jwt'; // Placeholder
-
     await this.notificationService.markAllAsRead(userId);
   }
 
@@ -114,19 +108,16 @@ export class NotificationsController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteNotification(
-    // @CurrentUser() user: CurrentUserDto,
+    @CurrentUser('sub') userId: string,
     @Param('id') notificationId: string,
   ): Promise<void> {
-    // TODO: Extract userId from JWT
-    const userId = 'user-id-from-jwt'; // Placeholder
-
     try {
       await this.notificationService.deleteNotification(notificationId, userId);
     } catch (error) {
-      if (error.message.includes('not found')) {
+      if (error instanceof Error && error.message.includes('not found')) {
         throw new NotFoundException('Notification not found');
       }
-      if (error.message.includes('access denied')) {
+      if (error instanceof Error && error.message.includes('access denied')) {
         throw new ForbiddenException('Access denied');
       }
       throw error;

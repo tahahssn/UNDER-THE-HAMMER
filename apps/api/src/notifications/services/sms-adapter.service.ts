@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as twilio from 'twilio';
-import { PrismaService } from '@uth/database';
+import twilio from 'twilio';
+import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDeliveryService } from './notification-delivery.service';
 import { RateLimitService } from './rate-limit.service';
+import { DeliveryStatus } from '../dto/notification-delivery.dto';
 
 /**
  * SMS delivery adapter using Twilio.
@@ -12,7 +13,7 @@ import { RateLimitService } from './rate-limit.service';
 @Injectable()
 export class SmsAdapterService {
   private logger = new Logger(SmsAdapterService.name);
-  private twilioClient: any;
+  private twilioClient: ReturnType<typeof twilio> | null;
 
   constructor(
     private configService: ConfigService,
@@ -25,6 +26,8 @@ export class SmsAdapterService {
 
     if (accountSid && authToken) {
       this.twilioClient = twilio(accountSid, authToken);
+    } else {
+      this.twilioClient = null;
     }
   }
 
@@ -45,7 +48,7 @@ export class SmsAdapterService {
         this.logger.warn('Twilio credentials not configured; skipping SMS send');
         await this.deliveryService.updateDeliveryStatus(
           deliveryRecordId,
-          'FAILED',
+          DeliveryStatus.FAILED,
           'TWILIO_NOT_CONFIGURED',
         );
         return;
@@ -61,7 +64,7 @@ export class SmsAdapterService {
         this.logger.error(`User phone number not found for user ${userId}`);
         await this.deliveryService.updateDeliveryStatus(
           deliveryRecordId,
-          'FAILED',
+          DeliveryStatus.FAILED,
           'NOTIFICATION_SMS_PHONE_NOT_FOUND',
         );
         return;
@@ -75,7 +78,7 @@ export class SmsAdapterService {
         );
         await this.deliveryService.updateDeliveryStatus(
           deliveryRecordId,
-          'FAILED',
+          DeliveryStatus.FAILED,
           'NOTIFICATION_SMS_PHONE_INVALID',
         );
         return;
@@ -89,7 +92,7 @@ export class SmsAdapterService {
         );
         await this.deliveryService.updateDeliveryStatus(
           deliveryRecordId,
-          'PENDING', // Not FAILED; will retry later
+          DeliveryStatus.PENDING, // Not FAILED; will retry later
           'RATE_LIMITED',
         );
         return;
@@ -116,21 +119,21 @@ export class SmsAdapterService {
       );
       await this.deliveryService.updateDeliveryStatus(
         deliveryRecordId,
-        'SENT',
+        DeliveryStatus.SENT,
         undefined,
         new Date(),
       );
     } catch (error) {
-      this.logger.error(`SMS delivery failed: ${error.message}`, error);
-      const errorMessage = error.message || 'SMS_SEND_FAILED';
+      this.logger.error(`SMS delivery failed: ${error instanceof Error ? error.message : String(error)}`, error);
+      const errorMessage = error instanceof Error ? error.message : 'SMS_SEND_FAILED';
       try {
         await this.deliveryService.updateDeliveryStatus(
           deliveryRecordId,
-          'FAILED',
+          DeliveryStatus.FAILED,
           errorMessage,
         );
       } catch (updateError) {
-        this.logger.error(`Failed to update delivery status: ${updateError.message}`);
+        this.logger.error(`Failed to update delivery status: ${updateError instanceof Error ? updateError.message : String(updateError)}`);
       }
     }
   }

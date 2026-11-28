@@ -201,29 +201,41 @@ export class AuctionsController {
     @CurrentUser('sub') userId: string,
     @Res() res: Response
   ) {
-    // Validate format parameter
+    // Validate format parameter (required)
     if (!format) {
       throw new BadRequestException('format query parameter is required (csv or xlsx)');
     }
 
     const normalizedFormat = format.toLowerCase();
     if (!Object.values(ExportFormat).includes(normalizedFormat as ExportFormat)) {
-      throw new BadRequestException(`Invalid format. Allowed values: ${Object.values(ExportFormat).join(', ')}`);
+      throw new BadRequestException(
+        `Invalid format. Allowed values: ${Object.values(ExportFormat).join(', ')}`
+      );
     }
 
     const exportFormat = normalizedFormat as ExportFormat;
 
     try {
+      // Verify authorization first
+      const auth = await this.exportService.verifyExportAuthorization(auctionId, userId);
+      
+      // Get metadata for filename
+      const data = await this.exportService.getSquadExportData(auctionId, auth.authorizedTeamId);
+      const filename = this.exportService.generateFilename(
+        auctionId,
+        data.roomName,
+        data.auctionName,
+        exportFormat
+      );
+
       if (exportFormat === ExportFormat.CSV) {
         const csvContent = await this.exportService.exportSquadCsv(auctionId, userId);
-        const filename = this.exportService.generateFilename(auctionId, exportFormat);
 
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(csvContent);
       } else if (exportFormat === ExportFormat.XLSX) {
         const xlsxBuffer = await this.exportService.exportSquadXlsx(auctionId, userId);
-        const filename = this.exportService.generateFilename(auctionId, exportFormat);
 
         res.setHeader(
           'Content-Type',
@@ -233,9 +245,9 @@ export class AuctionsController {
         res.send(xlsxBuffer);
       }
     } catch (error) {
-      if (error instanceof BadRequestException || 
-          error instanceof ForbiddenException || 
-          error instanceof NotFoundException) {
+      if (error instanceof BadRequestException ||
+        error instanceof ForbiddenException ||
+        error instanceof NotFoundException) {
         throw error;
       }
       throw new InternalServerErrorException('Failed to generate export');

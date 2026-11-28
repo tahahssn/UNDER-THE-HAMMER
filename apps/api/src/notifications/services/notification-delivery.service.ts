@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@uth/database';
+import { PrismaService } from '../../prisma/prisma.service';
 import { DeliveryStatus } from '../dto/notification-delivery.dto';
 import { NotificationDeliveryDto } from '../dto/notification-delivery.dto';
 
@@ -37,7 +37,7 @@ export class NotificationDeliveryService {
       ),
     );
 
-    return records.map((r) => NotificationDeliveryDto.fromPrisma(r));
+    return records.map((r: any) => NotificationDeliveryDto.fromPrisma(r));
   }
 
   /**
@@ -94,7 +94,7 @@ export class NotificationDeliveryService {
       orderBy: { createdAt: 'asc' },
     });
 
-    return records.map((r) => ({
+    return records.map((r: any) => ({
       ...NotificationDeliveryDto.fromPrisma(r),
       notification: r.notification,
     }));

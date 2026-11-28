@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '@uth/database';
+import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDeliveryService } from './notification-delivery.service';
+import { DeliveryStatus } from '../dto/notification-delivery.dto';
 
 /**
  * In-app notification adapter.
@@ -40,7 +41,7 @@ export class InAppAdapterService {
         );
         await this.deliveryService.updateDeliveryStatus(
           deliveryRecordId,
-          'FAILED',
+          DeliveryStatus.FAILED,
           'NOTIFICATION_NOT_FOUND',
         );
         return;
@@ -49,22 +50,22 @@ export class InAppAdapterService {
       // Mark delivery as SENT
       await this.deliveryService.updateDeliveryStatus(
         deliveryRecordId,
-        'SENT',
+        DeliveryStatus.SENT,
         undefined,
         new Date(),
       );
 
       this.logger.debug(`In-app notification delivered: ${notificationId}`);
     } catch (error) {
-      this.logger.error(`In-app delivery failed: ${error.message}`, error);
+      this.logger.error(`In-app delivery failed: ${error instanceof Error ? error.message : String(error)}`, error);
       try {
         await this.deliveryService.updateDeliveryStatus(
           deliveryRecordId,
-          'FAILED',
-          error.message,
+          DeliveryStatus.FAILED,
+          error instanceof Error ? error.message : String(error),
         );
       } catch (updateError) {
-        this.logger.error(`Failed to update delivery status: ${updateError.message}`);
+        this.logger.error(`Failed to update delivery status: ${updateError instanceof Error ? updateError.message : String(updateError)}`);
       }
     }
   }

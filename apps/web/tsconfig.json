@@ -24,6 +24,12 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@uth/contracts": [
+        "../../packages/contracts/src/index.ts"
+      ],
+      "@uth/contracts/*": [
+        "../../packages/contracts/src/*"
       ]
     },
     "incremental": true,

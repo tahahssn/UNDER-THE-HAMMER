@@ -10,9 +10,9 @@ export enum NotificationChannel {
  * User preference for a specific notification category across all channels.
  */
 export class UserPreferenceDto {
-  userId: string;
-  category: string;
-  channels: {
+  userId!: string;
+  category!: string;
+  channels!: {
     inApp: { enabled: boolean; consentedAt?: Date };
     email: { enabled: boolean; consentedAt?: Date };
     sms: { enabled: boolean; consentedAt?: Date };
@@ -44,9 +44,13 @@ export class UserPreferenceDto {
     // Return first category's structure as example
     // In practice, controller will return an array of these per category
     return {
-      userId: preferences[0]?.userId,
-      category: preferences[0]?.category,
-      channels: categories.get(preferences[0]?.category),
+      userId: preferences[0]?.userId || '',
+      category: preferences[0]?.category || '',
+      channels: categories.get(preferences[0]?.category) || {
+        inApp: { enabled: false },
+        email: { enabled: false },
+        sms: { enabled: false },
+      },
     };
   }
 }
